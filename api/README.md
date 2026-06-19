@@ -57,8 +57,11 @@ Create a `.env` (copy `.env.example`) with your `ANTHROPIC_API_KEY` first.
 ## Deploy to Vercel
 
 1. Push this folder to a GitHub repo and import it in Vercel (or `vercel` from the CLI). Vercel auto-detects Vite + the `/api` folder - no extra config needed.
-2. In the Vercel project, go to **Settings > Environment Variables** and add:
-   - `ANTHROPIC_API_KEY` - your key from console.anthropic.com. Without this, AI Analyse will show a clear error instead of failing silently.
+2. In the Vercel project, go to **Settings > Environment Variables** and add **one** of these (AI Analyse needs at least one):
+   - `ANTHROPIC_API_KEY` - paid, pay-as-you-go. Get one at console.anthropic.com.
+   - `GROQ_API_KEY` - **free, no credit card.** Get one at console.groq.com/keys. Runs an open model (Llama 3.3 70B) instead of Claude - quality is good but not the same as Claude.
+
+   You can set both and switch later - see "Switching AI providers" below.
 3. Redeploy after adding the env var (env vars only apply to new deployments).
 
 Binance Testnet keys are **not** an env var - each visitor connects their own from the BROKER tab, and they're stored only in that browser's `localStorage`.
@@ -71,6 +74,17 @@ Binance Testnet keys are **not** an env var - each visitor connects their own fr
 4. Your testnet account starts empty - use the faucet on testnet.binance.vision to get sandbox USDT before trading.
 
 Once connected, the **TRADE** button on crypto cards places a real market BUY order on Binance Testnet (spot accounts can't open shorts, so SELL is only used to close an existing position from the Trades tab).
+
+## Switching AI providers (Anthropic <-> Groq)
+
+`api/analyze.js` supports both and picks automatically:
+
+- Only `ANTHROPIC_API_KEY` set -> uses Claude.
+- Only `GROQ_API_KEY` set -> uses Groq (free, Llama 3.3 70B).
+- Both set -> uses Claude, unless you add `AI_PROVIDER=groq` to force Groq.
+- Neither set -> AI Analyse shows a clear "no AI key configured" message instead of failing silently.
+
+To switch later, just change the env vars in Vercel and redeploy - no code changes needed. Groq is a good free way to test the feature end-to-end before deciding whether Claude's answer quality is worth paying for.
 
 ## Known limitations / good next steps
 
