@@ -10,9 +10,13 @@ This version:
 
 - Is a real Vite project that deploys cleanly to Vercel.
 - Pulls **live crypto prices** from Binance's free public API (REST seed + WebSocket ticker) - no key required, replacing the random-walk simulator for the CRYPTO tab.
-- Routes the **AI Analyse** feature through a small serverless function (`api/analyze.js`) that holds your Anthropic API key server-side.
+- Routes the **AI Analyse** feature through a small serverless function (`api/analyze.js`) that holds your AI key server-side, supporting either Anthropic (Claude) or Groq (free) - see "Switching AI providers" below.
 - Adds a real **Binance Testnet** connection (`api/binance-testnet.js`) - sandbox funds, real order matching - so crypto trades placed from the app are genuine paper orders, not just local arithmetic.
 - Keeps **STOCKS and FOREX simulated** for now (clearly labeled "SIM" in the UI) - good next candidates for a real feed (Alpaca, OANDA) in a follow-up phase.
+- **Trades are clickable** - tap any open or closed position to see its price chart since open, live indicators, and what your stop loss / take profit would be worth in dollars.
+- The **AI Analyse panel includes a profit calculator** - enter an amount and see the potential dollar/percent outcome at the AI's suggested stop loss and take-profit levels.
+- Is **installable as an app** on phones and desktops (PWA manifest + service worker + icons).
+- Has **basic API hardening** - origin checks and per-IP rate limiting on both serverless functions, so a stranger who finds your deployed URL can't freely burn through your AI quota or hammer your endpoints.
 
 ## Project structure
 
@@ -57,8 +61,11 @@ Create a `.env` (copy `.env.example`) with your `ANTHROPIC_API_KEY` first.
 ## Deploy to Vercel
 
 1. Push this folder to a GitHub repo and import it in Vercel (or `vercel` from the CLI). Vercel auto-detects Vite + the `/api` folder - no extra config needed.
-2. In the Vercel project, go to **Settings > Environment Variables** and add:
-   - `ANTHROPIC_API_KEY` - your key from console.anthropic.com. Without this, AI Analyse will show a clear error instead of failing silently.
+2. In the Vercel project, go to **Settings > Environment Variables** and add **one** of these (AI Analyse needs at least one):
+   - `ANTHROPIC_API_KEY` - paid, pay-as-you-go. Get one at console.anthropic.com.
+   - `GROQ_API_KEY` - **free, no credit card.** Get one at console.groq.com/keys. Runs an open model (Llama 3.3 70B) instead of Claude - quality is good but not the same as Claude.
+
+   You can set both and switch later - see "Switching AI providers" below.
 3. Redeploy after adding the env var (env vars only apply to new deployments).
 
 Binance Testnet keys are **not** an env var - each visitor connects their own from the BROKER tab, and they're stored only in that browser's `localStorage`.
@@ -71,6 +78,24 @@ Binance Testnet keys are **not** an env var - each visitor connects their own fr
 4. Your testnet account starts empty - use the faucet on testnet.binance.vision to get sandbox USDT before trading.
 
 Once connected, the **TRADE** button on crypto cards places a real market BUY order on Binance Testnet (spot accounts can't open shorts, so SELL is only used to close an existing position from the Trades tab).
+
+## Switching AI providers (Anthropic <-> Groq)
+
+`api/analyze.js` supports both and picks automatically:
+
+- Only `ANTHROPIC_API_KEY` set -> uses Claude.
+- Only `GROQ_API_KEY` set -> uses Groq (free, Llama 3.3 70B).
+- Both set -> uses Claude, unless you add `AI_PROVIDER=groq` to force Groq.
+- Neither set -> AI Analyse shows a clear "no AI key configured" message instead of failing silently.
+
+To switch later, just change the env vars in Vercel and redeploy - no code changes needed. Groq is a good free way to test the feature end-to-end before deciding whether Claude's answer quality is worth paying for.
+
+## Security notes
+
+- **Your AI and Binance keys never reach the browser.** `ANTHROPIC_API_KEY`/`GROQ_API_KEY` live only in Vercel's environment variables; Binance Testnet keys live only in your own browser's `localStorage` and are sent per-request to your own `/api/binance-testnet` function, which signs and forwards them - never logged, never stored server-side.
+- **Both serverless functions check the request's Origin** and reject anything not coming from your own deployed domain, plus apply basic per-IP rate limiting. This stops casual abuse (other sites' scripts calling your API, or one IP hammering it) but isn't a substitute for watching your usage - check usage dashboards on console.anthropic.com / console.groq.com occasionally, and rotate a key immediately if you ever suspect it leaked.
+- **Binance Testnet only** - this app deliberately never talks to the real exchange, so even a worst-case key leak only exposes sandbox funds, not real money.
+- If you ever accidentally commit a real API key to GitHub, treat it as compromised: revoke/regenerate it immediately, don't just delete the line - it stays in your repo's history otherwise. Keep `.env` out of git (already covered by `.gitignore`).
 
 ## Known limitations / good next steps
 

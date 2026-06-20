@@ -1,5 +1,20 @@
+// FDS Trading - AI signal analysis proxy
+//
+// Supports two providers - the browser never sees either key:
+//   - Anthropic (Claude) - paid, set ANTHROPIC_API_KEY
+//   - Groq (free, no credit card, runs open models like Llama) - set GROQ_API_KEY
+//
+// Which one is used:
+//   - If AI_PROVIDER is set to "anthropic" or "groq", that wins.
+//   - Otherwise: ANTHROPIC_API_KEY is used if present, else GROQ_API_KEY.
+// Set these in Vercel > Project > Settings > Environment Variables (or in a
+// local .env when running `vercel dev`) - see README.md.
+
+import { checkOrigin, rateLimit } from "./_security.js";
+
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 const ANTHROPIC_MODEL = "claude-sonnet-4-6";
+const MAX_PROMPT_LENGTH = 4000;
 
 function pickProvider() {
   const forced = (process.env.AI_PROVIDER || "").toLowerCase();
@@ -52,6 +67,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (!checkOrigin(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  if (!rateLimit(req, { windowMs: 60000, max: 15 })) {
+    res.status(429).json({ error: "Too many requests - please wait a moment and try again." });
+    return;
+  }
+
   const provider = pickProvider();
   if (!provider) {
     res.status(500).json({
@@ -64,6 +89,10 @@ export default async function handler(req, res) {
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== "string") {
     res.status(400).json({ error: "Missing prompt" });
+    return;
+  }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    res.status(400).json({ error: "Prompt too long" });
     return;
   }
 

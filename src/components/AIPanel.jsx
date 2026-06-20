@@ -36,6 +36,75 @@ One insight.
 When to watch.`;
 }
 
+function parseLevel(text, label) {
+  const re = new RegExp(`${label}[^\\n]*?([0-9][0-9,]*\\.?[0-9]*)`, "i");
+  const m = text.match(re);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(/,/g, ""));
+  return isNaN(n) || n <= 0 ? null : n;
+}
+
+function parseTradeLevels(text) {
+  return {
+    entry: parseLevel(text, "Entry Zone"),
+    sl: parseLevel(text, "Stop Loss"),
+    tp1: parseLevel(text, "Take Profit 1"),
+    tp2: parseLevel(text, "Take Profit 2"),
+  };
+}
+
+function ProfitCalculator({ sym, market, levels, livePrice }) {
+  const [amt, setAmt] = useState("100");
+  const invested = parseFloat(amt) || 0;
+  const entry = levels.entry || livePrice;
+  if (!entry) return null;
+
+  const rows = [
+    { l: "Stop Loss", price: levels.sl, c: C.red },
+    { l: "Take Profit 1", price: levels.tp1, c: C.green },
+    { l: "Take Profit 2", price: levels.tp2, c: C.green },
+  ].filter((r) => r.price);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div style={{ background: "#f8fafc", border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Potential Profit Calculator</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 10, color: C.text3 }}>If I invest $</span>
+          <input
+            value={amt}
+            onChange={(e) => setAmt(e.target.value)}
+            style={{ width: 70, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 7px", fontSize: 11, fontFamily: "monospace" }}
+          />
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${rows.length}, 1fr)`, gap: 10 }}>
+        {rows.map((r) => {
+          const units = invested / entry;
+          const pnl = (r.price - entry) * units;
+          const pct = entry ? ((r.price - entry) / entry) * 100 : 0;
+          return (
+            <div key={r.l}>
+              <div style={{ fontSize: 9, color: C.text3, marginBottom: 2 }}>{r.l}</div>
+              <div style={{ fontSize: 10, color: C.text2, fontFamily: "monospace", marginBottom: 2 }}>
+                {pfx(market, sym.id)}
+                {fmtP(r.price, sym.id)}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: r.c, fontFamily: "monospace" }}>
+                {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+                <span style={{ fontSize: 10, fontWeight: 600 }}> ({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 9, color: C.text3, marginTop: 8 }}>Based on the AI's suggested entry/exit zones - actual fills may differ, especially on fast-moving prices.</div>
+    </div>
+  );
+}
+
 export default function AIPanel({ target, onClose, onJournal, onTrade }) {
   const { sym, market, data } = target;
   const [text, setText] = useState("");
@@ -44,6 +113,7 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
   const [saved, setSaved] = useState(false);
   const [dots, setDots] = useState("");
   const [errored, setErrored] = useState(false);
+  const [provider, setProvider] = useState(null);
 
   useEffect(() => {
     const iv = setInterval(() => setDots((d) => (d.length >= 3 ? "" : d + ".")), 400);
@@ -72,6 +142,7 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
         const m = t.match(/SIGNAL:\s*(STRONG_BUY|BUY|HOLD|SELL|STRONG_SELL)/);
         if (m) setSig(m[1]);
         setText(t);
+        setProvider(d.provider || null);
         setLoading(false);
       })
       .catch(() => {
@@ -189,9 +260,9 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
               <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>Couldn't get an analysis</div>
               <div style={{ fontSize: 12, color: C.text2, maxWidth: 420, margin: "0 auto" }}>{text}</div>
-              {text.includes("ANTHROPIC_API_KEY") && (
+              {text.includes("AI key configured") && (
                 <div style={{ fontSize: 11, color: C.text3, marginTop: 10 }}>
-                  This needs an Anthropic API key set as an environment variable on your deployment - see README.md.
+                  This needs ANTHROPIC_API_KEY or GROQ_API_KEY set as an environment variable on your deployment - see README.md.
                 </div>
               )}
             </div>
@@ -213,6 +284,7 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
                     );
                   })}
               </div>
+              <ProfitCalculator sym={sym} market={market} levels={parseTradeLevels(text)} livePrice={data.price} />
               {text
                 .split("\n")
                 .filter((ln) => !ln.startsWith("SIGNAL:") && !ln.startsWith("CONFIDENCE:") && !ln.startsWith("TIMEFRAME:"))
@@ -241,7 +313,7 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
           )}
         </div>
         <div style={{ padding: "10px 22px", borderTop: `1px solid ${C.border}`, background: "#f8fafc", fontSize: 10, color: C.text3, textAlign: "center" }}>
-          FDS Trading - AI Signal Engine - FOR INFORMATIONAL PURPOSES ONLY - NOT FINANCIAL ADVICE
+          FDS Trading - AI Signal Engine{provider ? ` (${provider === "groq" ? "Groq / Llama" : "Anthropic / Claude"})` : ""} - FOR INFORMATIONAL PURPOSES ONLY - NOT FINANCIAL ADVICE
         </div>
       </div>
     </div>

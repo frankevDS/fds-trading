@@ -12,6 +12,7 @@
 // real exchange, so there is no path from this app to a live trading account.
 
 import crypto from "crypto";
+import { checkOrigin, rateLimit } from "./_security.js";
 
 const BASE = "https://testnet.binance.vision";
 
@@ -30,6 +31,16 @@ function sign(queryString, secret) {
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  if (!checkOrigin(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  if (!rateLimit(req, { windowMs: 60000, max: 30 })) {
+    res.status(429).json({ error: "Too many requests - please wait a moment and try again." });
     return;
   }
 
