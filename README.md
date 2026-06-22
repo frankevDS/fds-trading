@@ -79,6 +79,18 @@ Binance Testnet keys are **not** an env var - each visitor connects their own fr
 
 Once connected, the **TRADE** button on crypto cards places a real market BUY order on Binance Testnet (spot accounts can't open shorts, so SELL is only used to close an existing position from the Trades tab).
 
+## Fixing "Service unavailable from a restricted location" on Binance Testnet
+
+This is not about where *you* are - it's about where Vercel runs your serverless function. By default that's a US data center, and Binance blocks API requests from US server infrastructure (a well-documented, common issue - search the exact error and you'll see the same message from developers worldwide on AWS/Vercel/Heroku/Colab, regardless of their own country).
+
+`vercel.json` in this project sets the function region to `fra1` (Frankfurt) to avoid that block. To make sure it's actually applied:
+
+1. In Vercel: **Settings > Functions** (or **General**, depending on layout) - look for **Function Region**.
+2. Confirm it shows **Frankfurt, Germany (fra1)**. If it still shows Washington D.C. (iad1), select Frankfurt manually and save.
+3. Redeploy.
+
+If Frankfurt is ever blocked too (rare, but Binance's restricted list can change), try `sin1` (Singapore) or `hnd1` (Tokyo) instead - edit the `regions` array in `vercel.json` and redeploy.
+
 ## Switching AI providers (Anthropic <-> Groq)
 
 `api/analyze.js` supports both and picks automatically:

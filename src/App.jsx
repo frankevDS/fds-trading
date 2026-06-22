@@ -25,6 +25,14 @@ export default function App() {
   const [wallet, setWallet] = useState(INIT_WALLET);
   const [clock, setClock] = useState(new Date());
   const [brokerConnected, setBrokerConnected] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 860);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 860);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     initBinanceFeed(INSTRUMENTS.CRYPTO);
@@ -111,18 +119,47 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "Arial,sans-serif", display: "flex" }}>
       <style>{`*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#f1f5f9}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}button,input,textarea,select{font-family:inherit;outline:none}select option{background:#fff}`}</style>
 
-      <div style={{ width: 210, minHeight: "100vh", background: C.nav, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div
+        style={
+          isMobile
+            ? {
+                position: "fixed",
+                top: 0,
+                left: 0,
+                bottom: 0,
+                width: 230,
+                background: C.nav,
+                display: "flex",
+                flexDirection: "column",
+                zIndex: 200,
+                transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+                transition: "transform 0.22s ease",
+                boxShadow: sidebarOpen ? "4px 0 24px rgba(0,0,0,0.3)" : "none",
+              }
+            : { width: 210, minHeight: "100vh", background: C.nav, display: "flex", flexDirection: "column", flexShrink: 0 }
+        }
+      >
         <div style={{ padding: "20px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 9, background: "linear-gradient(135deg,#3b82f6,#1d4ed8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, color: "#fff" }}>
-              F
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 900, color: "#fff" }}>
-                FDS <span style={{ color: "#60a5fa" }}>TRADING</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 9, background: "linear-gradient(135deg,#3b82f6,#1d4ed8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, color: "#fff" }}>
+                F
               </div>
-              <div style={{ fontSize: 8, color: "rgba(255,255,255,0.35)", letterSpacing: "0.1em" }}>AI PLATFORM</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 900, color: "#fff" }}>
+                  FDS <span style={{ color: "#60a5fa" }}>TRADING</span>
+                </div>
+                <div style={{ fontSize: 8, color: "rgba(255,255,255,0.35)", letterSpacing: "0.1em" }}>AI PLATFORM</div>
+              </div>
             </div>
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(false)}
+                style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", width: 30, height: 30, borderRadius: 8, fontSize: 16, cursor: "pointer" }}
+              >
+                x
+              </button>
+            )}
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -139,7 +176,10 @@ export default function App() {
           {NAV_ITEMS.map((item) => (
             <button
               key={item}
-              onClick={() => setNav(item)}
+              onClick={() => {
+                setNav(item);
+                if (isMobile) setSidebarOpen(false);
+              }}
               style={{
                 width: "100%",
                 display: "flex",
@@ -185,13 +225,30 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh", overflow: "auto" }}>
-        <div style={{ background: "#fff", borderBottom: `1px solid ${C.border}`, padding: "12px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", flexShrink: 0 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>
-              {NAV_ICONS[nav]} {nav}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 190 }}
+        />
+      )}
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh", overflow: "auto", width: "100%", minWidth: 0 }}>
+        <div style={{ background: "#fff", borderBottom: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", flexShrink: 0, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                style={{ background: "#f1f5f9", border: `1px solid ${C.border}`, color: C.text, width: 36, height: 36, borderRadius: 8, fontSize: 16, cursor: "pointer", flexShrink: 0 }}
+              >
+                ☰
+              </button>
+            )}
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>
+                {NAV_ICONS[nav]} {nav}
+              </div>
+              <div style={{ fontSize: 11, color: C.text3 }}>FDS Trading - AI-Powered Platform</div>
             </div>
-            <div style={{ fontSize: 11, color: C.text3 }}>FDS Trading - AI-Powered Platform</div>
           </div>
           {nav === "MARKETS" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -165,6 +165,9 @@ export default function BrokerView({ connected, onConnected, onDisconnected }) {
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, color: C.text2, marginBottom: 10 }}>OTHER BROKERS</div>
+      <div style={{ fontSize: 11, color: C.text3, marginBottom: 10 }}>
+        These aren't built yet on purpose - each one needs its own secure server-side connection, the same way Binance Testnet above works. No input fields here yet because there's nothing live to connect to.
+      </div>
       {OTHER_BROKERS.map((b) => (
         <div key={b.name} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 18px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -172,7 +175,7 @@ export default function BrokerView({ connected, onConnected, onDisconnected }) {
             <div style={{ fontSize: 11, color: C.text3 }}>{b.note}</div>
           </div>
           <span style={{ fontSize: 9, fontWeight: 700, color: C.text3, background: "#f1f5f9", border: `1px solid ${C.border}`, borderRadius: 5, padding: "2px 8px" }}>
-            NOT CONNECTED
+            COMING SOON
           </span>
         </div>
       ))}

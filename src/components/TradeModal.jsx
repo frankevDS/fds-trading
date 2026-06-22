@@ -10,13 +10,15 @@ export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onCl
   const [amt, setAmt] = useState("");
   const [sl, setSl] = useState("");
   const [tp, setTp] = useState("");
+  const [leverage, setLeverage] = useState(1);
   const [placing, setPlacing] = useState(false);
   const [err, setErr] = useState("");
 
   const avail = wallet.balance;
   const invested = parseFloat(amt) || 0;
   const price = pre?.price || 1;
-  const units = invested / price;
+  const effectiveLeverage = isCryptoBroker ? 1 : leverage;
+  const units = (invested / price) * effectiveLeverage;
 
   async function handleSubmit() {
     if (!invested || invested > avail || placing) return;
@@ -63,6 +65,7 @@ export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onCl
       sl,
       tp,
       units,
+      leverage: effectiveLeverage,
       status: "OPEN",
       openDate: new Date().toISOString(),
       tradeId: Date.now(),
@@ -158,6 +161,40 @@ export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onCl
             style={{ width: "100%", border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 12, color: C.text, boxSizing: "border-box" }}
           />
         </div>
+
+        {!isCryptoBroker && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: C.text2, display: "block", marginBottom: 5 }}>
+              Lot Size (Leverage) - Virtual account only
+            </label>
+            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+              {[1, 2, 5, 10, 20].map((lv) => (
+                <button
+                  key={lv}
+                  onClick={() => setLeverage(lv)}
+                  style={{
+                    flex: 1,
+                    background: leverage === lv ? C.purple : "#fff",
+                    color: leverage === lv ? "#fff" : C.text2,
+                    border: `1px solid ${leverage === lv ? C.purple : C.border}`,
+                    padding: "7px 0",
+                    borderRadius: 7,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {lv}x
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: C.text3 }}>
+              {leverage === 1
+                ? "Standard size - your position matches your invested amount."
+                : `Position size is ${leverage}x your invested amount (units: ${units.toFixed(6)}). Profit AND loss scale by the same ${leverage}x - this only affects your virtual wallet, never a real Binance Testnet order.`}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
           {[
