@@ -37,6 +37,15 @@ const SIG_RANK = { STRONG_BUY: 0, BUY: 1, HOLD: 2, SELL: 3, STRONG_SELL: 4 };
 export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState("ALL");
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" && window.innerWidth < 700
+  );
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 700);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     setRows(snapshotAll());
@@ -54,8 +63,8 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
     .sort((a, b) => SIG_RANK[a.sig] - SIG_RANK[b.sig]);
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+    <div style={{ padding: "14px 14px" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
         {["ALL", "BUY", "SELL", ...MKTABS].map((f) => (
           <button
             key={f}
@@ -64,7 +73,7 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
               background: filter === f ? C.blue : "#fff",
               color: filter === f ? "#fff" : C.text2,
               border: `1px solid ${filter === f ? C.blue : C.border}`,
-              padding: "7px 14px",
+              padding: "7px 12px",
               borderRadius: 8,
               fontSize: 11,
               fontWeight: 700,
@@ -80,7 +89,53 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 50, textAlign: "center" }}>
           <span style={{ fontSize: 12, color: C.text3 }}>Connecting to live data...</span>
         </div>
+      ) : isMobile ? (
+        // Mobile: card layout
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map((r) => (
+            <div
+              key={r.sym.id}
+              style={{
+                background: C.card,
+                border: `1px solid ${C.border}`,
+                borderRadius: 12,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{r.sym.label}</span>
+                  <span style={{ fontSize: 9, color: C.text3, background: "#f8fafc", border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px", marginLeft: 6 }}>{r.market}</span>
+                </div>
+                <Badge sig={r.sig} sm={true} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: C.text, fontFamily: "monospace" }}>
+                  {pfx(r.market, r.sym.id)}{fmtP(r.price, r.sym.id)}
+                </span>
+                <span style={{ fontSize: 11, color: C.text2 }}>RSI {r.ind.rsi.toFixed(0)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => onAnalyse(r.sym, r.market, { price: r.price, ...r.ind })}
+                  style={{ flex: 1, background: C.blueL, color: C.blue, border: `1px solid ${C.blueB}`, padding: "8px 0", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                >
+                  ANALYSE
+                </button>
+                {hasBalance && (
+                  <button
+                    onClick={() => onTrade(r.sym, r.market, r.sig, r.price, r.ind)}
+                    style={{ flex: 1, background: C.green, color: "#fff", border: "none", padding: "8px 0", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    TRADE
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
+        // Desktop: table layout
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflow: "hidden" }}>
           {filtered.map((r, i) => (
             <div
@@ -97,8 +152,7 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
                 <span style={{ fontSize: 13, fontWeight: 800, color: C.text, width: 90 }}>{r.sym.label}</span>
                 <span style={{ fontSize: 9, color: C.text3, background: "#f8fafc", border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px" }}>{r.market}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>
-                  {pfx(r.market, r.sym.id)}
-                  {fmtP(r.price, r.sym.id)}
+                  {pfx(r.market, r.sym.id)}{fmtP(r.price, r.sym.id)}
                 </span>
                 <span style={{ fontSize: 10, color: C.text2 }}>RSI {r.ind.rsi.toFixed(0)}</span>
               </div>

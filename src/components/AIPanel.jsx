@@ -187,69 +187,71 @@ export default function AIPanel({ target, onClose, onJournal, onTrade }) {
       >
         <div
           style={{
-            padding: "16px 22px",
+            padding: "12px 16px",
             borderBottom: `1px solid ${C.border}`,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            flexDirection: "column",
+            gap: 10,
             background: "#f8fafc",
           }}
         >
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{sym.label}</span>
-              <span style={{ fontSize: 10, background: C.blueL, color: C.blue, border: `1px solid ${C.blueB}`, padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>
-                {market}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{sym.label}</span>
+                <span style={{ fontSize: 10, background: C.blueL, color: C.blue, border: `1px solid ${C.blueB}`, padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>
+                  {market}
+                </span>
+                {sig && <Badge sig={sig} />}
+              </div>
+              <span style={{ fontSize: 18, fontWeight: 900, color: C.text, fontFamily: "monospace" }}>
+                {pfx(market, sym.id)}
+                {fmtP(data.price, sym.id)}
+                <span style={{ fontSize: 11, marginLeft: 6, color: pos ? C.green : C.red, fontWeight: 700 }}>
+                  {pos ? "▲" : "▼"}
+                  {Math.abs(data.change24 || 0).toFixed(2)}%
+                </span>
               </span>
-              {sig && <Badge sig={sig} />}
             </div>
-            <span style={{ fontSize: 20, fontWeight: 900, color: C.text, fontFamily: "monospace" }}>
-              {pfx(market, sym.id)}
-              {fmtP(data.price, sym.id)}
-              <span style={{ fontSize: 12, marginLeft: 8, color: pos ? C.green : C.red, fontWeight: 700 }}>
-                {pos ? "▲" : "▼"}
-                {Math.abs(data.change24 || 0).toFixed(2)}%
-              </span>
-            </span>
+            <button onClick={onClose} style={{ background: "#fff", border: `1px solid ${C.border}`, color: C.text2, width: 34, height: 34, borderRadius: 8, cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
+              x
+            </button>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {!loading && sig && (
+          {!loading && sig && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 onClick={() => {
                   onTrade && onTrade(sym, market, sig, data.price, data);
                   onClose();
                 }}
-                style={{ background: C.green, color: "#fff", border: "none", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}
+                style={{ flex: 1, minWidth: 100, background: C.green, color: "#fff", border: "none", padding: "9px 12px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}
               >
                 TRADE NOW
               </button>
-            )}
-            {!loading && sig && (
               <button
                 onClick={() => {
                   onJournal(sym, market, sig, data.price, text);
                   setSaved(true);
                 }}
                 style={{
+                  flex: 1,
+                  minWidth: 100,
                   background: saved ? C.greenL : "#fff",
                   color: saved ? C.green : C.blue,
                   border: `1px solid ${saved ? C.greenB : C.blueB}`,
-                  padding: "8px 16px",
+                  padding: "9px 12px",
                   borderRadius: 8,
                   cursor: "pointer",
                   fontSize: 11,
                   fontWeight: 700,
                 }}
               >
-                {saved ? "SAVED" : "JOURNAL"}
+                {saved ? "SAVED ✓" : "JOURNAL"}
               </button>
-            )}
-            <button onClick={onClose} style={{ background: "#fff", border: `1px solid ${C.border}`, color: C.text2, width: 34, height: 34, borderRadius: 8, cursor: "pointer", fontSize: 16 }}>
-              x
-            </button>
-          </div>
+            </div>
+          )}
         </div>
-        <div style={{ padding: "20px 22px", overflowY: "auto", flex: 1 }}>
+        <div style={{ padding: "14px 16px", overflowY: "auto", flex: 1 }}>
           {loading ? (
             <div style={{ textAlign: "center", padding: "50px 0" }}>
               <div style={{ fontSize: 40, marginBottom: 14 }}>⚡</div>

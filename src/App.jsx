@@ -268,14 +268,14 @@ export default function App() {
           )}
         </div>
 
-        <div style={{ flex: 1, animation: "fadeIn 0.25s ease" }}>
+        <div style={{ flex: 1, animation: "fadeIn 0.25s ease", padding: nav === "MARKETS" || nav === "SCANNER" ? 0 : "0 0 24px 0" }}>
           {nav === "DASHBOARD" && (
             <div style={{ padding: 24 }}>
               <div style={{ marginBottom: 22 }}>
                 <h1 style={{ fontSize: 22, fontWeight: 800, color: C.text, marginBottom: 4 }}>Good day, Trader 👋</h1>
                 <p style={{ fontSize: 13, color: C.text2 }}>Your FDS Trading dashboard.</p>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 14, marginBottom: 22 }}>
                 <StatCard label="WALLET BALANCE" value={`$${wallet.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} sub="Virtual account" color={C.blue} icon="💰" />
                 <StatCard label="OPEN TRADES" value={openTrades} sub={`${trades.length} total`} color={C.yellow} icon="📊" />
                 <StatCard label="WIN RATE" value={`${wr}%`} sub={`${wins} wins of ${trades.length}`} color={parseInt(wr) > 50 ? C.green : C.red} icon="🎯" />
@@ -300,7 +300,7 @@ export default function App() {
             </div>
           )}
           {nav === "MARKETS" && (
-            <div key={`${mkt}-${rk}`} style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(275px,1fr))", gap: 14, animation: "fadeIn 0.25s ease" }}>
+            <div key={`${mkt}-${rk}`} style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12, animation: "fadeIn 0.25s ease" }}>
               {syms.map((sym) => (
                 <MarketCard
                   key={`${sym.id}-${rk}`}
@@ -317,11 +317,11 @@ export default function App() {
             </div>
           )}
           {nav === "SCANNER" && <Scanner onAnalyse={handleAnalyse} onTrade={handleTrade} hasBalance={hasBalance} />}
-          {nav === "WALLET" && <WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} />}
-          {nav === "TRADES" && <TradesView trades={trades} onCloseTrade={closeTrade} />}
-          {nav === "JOURNAL" && <JournalView entries={journal} onAdd={handleAddJournal} />}
-          {nav === "PORTFOLIO" && <PortfolioView trades={trades} />}
-          {nav === "BROKER" && <BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} />}
+          {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} /></div>}
+          {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} /></div>}
+          {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}
+          {nav === "PORTFOLIO" && <div style={{ padding: "14px 14px" }}><PortfolioView trades={trades} /></div>}
+          {nav === "BROKER" && <div style={{ padding: "14px 14px" }}><BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} /></div>}
         </div>
 
         <div style={{ padding: "10px 22px", borderTop: `1px solid ${C.border}`, background: "#fff", fontSize: 9, color: C.text3, textAlign: "center" }}>
