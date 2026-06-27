@@ -29,7 +29,7 @@ function useLiveData(trade) {
   return state;
 }
 
-function TradeRow({ trade, onClosed }) {
+function TradeRow({ trade, onClosed, onChart }) {
   const live = useLiveData(trade);
   const [closing, setClosing] = useState(false);
   const [err, setErr] = useState("");
@@ -134,10 +134,16 @@ function TradeRow({ trade, onClosed }) {
 
       {expanded && (
         <div onClick={(e) => e.stopPropagation()} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, marginTop: 4, animation: "fadeIn 0.2s ease" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.text2 }}>PRICE SINCE OPEN</div>
-            {live.history && live.history.length > 1 && <Spark points={live.history.slice(-40)} pos={pnl >= 0} w={160} h={40} />}
+            <button
+              onClick={() => onChart && onChart(trade)}
+              style={{ background: C.nav, color: "#fff", border: "none", padding: "6px 14px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+            >
+              📊 Full Chart
+            </button>
           </div>
+          {live.history && live.history.length > 1 && <Spark points={live.history.slice(-40)} pos={pnl >= 0} w={160} h={40} />}
 
           {(hasSl || hasTp) && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
@@ -204,7 +210,7 @@ function TradeRow({ trade, onClosed }) {
   );
 }
 
-export default function TradesView({ trades, onCloseTrade }) {
+export default function TradesView({ trades, onCloseTrade, onChart }) {
   const open = trades.filter((t) => t.status === "OPEN");
   const closed = trades.filter((t) => t.status === "CLOSED");
 
@@ -225,19 +231,16 @@ export default function TradesView({ trades, onCloseTrade }) {
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.text2, marginBottom: 10 }}>OPEN POSITIONS ({open.length})</div>
           {open.map((t) => (
-            <TradeRow key={t.tradeId} trade={t} onClosed={onCloseTrade} />
+            <TradeRow key={t.tradeId} trade={t} onClosed={onCloseTrade} onChart={onChart} />
           ))}
         </>
       )}
       {closed.length > 0 && (
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.text2, margin: "18px 0 10px" }}>CLOSED TRADES ({closed.length})</div>
-          {closed
-            .slice()
-            .reverse()
-            .map((t) => (
-              <TradeRow key={t.tradeId} trade={t} onClosed={onCloseTrade} />
-            ))}
+          {closed.slice().reverse().map((t) => (
+            <TradeRow key={t.tradeId} trade={t} onClosed={onCloseTrade} onChart={onChart} />
+          ))}
         </>
       )}
     </div>

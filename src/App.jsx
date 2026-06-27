@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { C, INSTRUMENTS, NAV_ITEMS, NAV_ICONS, MKTABS, INIT_WALLET } from "./lib/constants";
 import { initBinanceFeed } from "./lib/binanceFeed";
 import { hasStoredBinanceKeys } from "./components/BrokerView";
+import { storage } from "./lib/storage";
 import { StatCard } from "./components/shared";
 import MarketCard from "./components/MarketCard";
 import AIPanel from "./components/AIPanel";
@@ -14,17 +15,19 @@ import BrokerView from "./components/BrokerView";
 import TradeModal from "./components/TradeModal";
 import DashboardCharts from "./components/DashboardCharts";
 import PriceAlerts from "./components/PriceAlerts";
+import ChartPanel from "./components/ChartPanel";
 
 export default function App() {
-  const [nav, setNav] = useState("DASHBOARD");
-  const [mkt, setMkt] = useState("CRYPTO");
+  const [nav, setNav] = useState(() => storage.loadNav("DASHBOARD"));
+  const [mkt, setMkt] = useState(() => storage.loadMktab("CRYPTO"));
   const [rk, setRk] = useState(0);
   const [aiTarget, setAiTarget] = useState(null);
-  const [journal, setJournal] = useState([]);
-  const [trades, setTrades] = useState([]);
-  const [watchlist, setWatchlist] = useState([]);
+  const [journal, setJournal] = useState(() => storage.loadJournal([]));
+  const [trades, setTrades] = useState(() => storage.loadTrades([]));
+  const [watchlist, setWatchlist] = useState(() => storage.loadWatchlist([]));
   const [tradeModal, setTradeModal] = useState(null);
-  const [wallet, setWallet] = useState(INIT_WALLET);
+  const [chartTrade, setChartTrade] = useState(null);
+  const [wallet, setWallet] = useState(() => storage.loadWallet(INIT_WALLET));
   const [clock, setClock] = useState(new Date());
   const [brokerConnected, setBrokerConnected] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 860);
@@ -42,6 +45,14 @@ export default function App() {
     const iv = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(iv);
   }, []);
+
+  // Persist to localStorage whenever any of these change
+  useEffect(() => { storage.saveTrades(trades); }, [trades]);
+  useEffect(() => { storage.saveWallet(wallet); }, [wallet]);
+  useEffect(() => { storage.saveJournal(journal); }, [journal]);
+  useEffect(() => { storage.saveWatchlist(watchlist); }, [watchlist]);
+  useEffect(() => { storage.saveNav(nav); }, [nav]);
+  useEffect(() => { storage.saveMktab(mkt); }, [mkt]);
 
   const deposit = (amt) =>
     setWallet((w) => ({
@@ -93,6 +104,15 @@ export default function App() {
           : x
       )
     );
+  };
+
+  const handleReset = () => {
+    setTrades([]);
+    setJournal([]);
+    setWatchlist([]);
+    setWallet(INIT_WALLET);
+    setNav("DASHBOARD");
+    setMkt("CRYPTO");
   };
 
   const handleAnalyse = (sym, market, data) => setAiTarget({ sym, market, data });
@@ -321,8 +341,8 @@ export default function App() {
           )}
           {nav === "SCANNER" && <Scanner onAnalyse={handleAnalyse} onTrade={handleTrade} hasBalance={hasBalance} />}
           {nav === "ALERTS" && <div style={{ padding: "14px 14px" }}><PriceAlerts instruments={INSTRUMENTS.CRYPTO} /></div>}
-          {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} /></div>}
-          {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} /></div>}
+          {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} onReset={handleReset} /></div>}
+          {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} onChart={setChartTrade} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}
           {nav === "PORTFOLIO" && <div style={{ padding: "14px 14px" }}><PortfolioView trades={trades} /></div>}
           {nav === "BROKER" && <div style={{ padding: "14px 14px" }}><BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} /></div>}
@@ -337,6 +357,7 @@ export default function App() {
       {tradeModal && (
         <TradeModal pre={tradeModal} wallet={wallet} brokerConnected={brokerConnected} onPlace={placeTrade} onClose={() => setTradeModal(null)} />
       )}
+      {chartTrade && <ChartPanel trade={chartTrade} onClose={() => setChartTrade(null)} />}
     </div>
   );
 }

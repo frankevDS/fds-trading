@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { C } from "../lib/constants";
 import { StatCard } from "./shared";
+import { storage } from "../lib/storage";
 
 const PRESETS = [1000, 5000, 10000, 25000, 50000, 100000];
 
-export default function WalletView({ wallet, trades, onDeposit, onWithdraw }) {
+export default function WalletView({ wallet, trades, onDeposit, onWithdraw, onReset }) {
   const [tab, setTab] = useState("OVERVIEW");
   const [amt, setAmt] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const inTrades = trades.filter((t) => t.status === "OPEN").reduce((a, t) => a + t.invested, 0);
 
@@ -16,6 +18,13 @@ export default function WalletView({ wallet, trades, onDeposit, onWithdraw }) {
     if (type === "WITHDRAW" && v > wallet.balance) return;
     type === "DEPOSIT" ? onDeposit(v) : onWithdraw(v);
     setAmt("");
+  }
+
+  function handleReset() {
+    if (!confirmReset) { setConfirmReset(true); return; }
+    storage.clearAll();
+    onReset && onReset();
+    setConfirmReset(false);
   }
 
   return (
@@ -56,12 +65,33 @@ export default function WalletView({ wallet, trades, onDeposit, onWithdraw }) {
               { l: "Current balance", v: `$${wallet.balance.toFixed(2)}` },
               { l: "Capital in open trades", v: `$${inTrades.toFixed(2)}` },
               { l: "Net (deposits vs current + open)", v: `$${(wallet.balance + inTrades - wallet.totalDeposited).toFixed(2)}` },
+              { l: "Storage used", v: `${storage.usageKB()} KB` },
             ].map((r) => (
               <div key={r.l} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
                 <span style={{ color: C.text2 }}>{r.l}</span>
                 <span style={{ fontWeight: 700, color: C.text }}>{r.v}</span>
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.text, marginBottom: 4 }}>Reset Account</div>
+            <div style={{ fontSize: 11, color: C.text3, marginBottom: 10 }}>
+              Clears all trades, wallet history, journal entries, and watchlist from this browser. Use this to start fresh. This cannot be undone.
+            </div>
+            <button
+              onClick={handleReset}
+              style={{ background: confirmReset ? C.red : "#fff", color: confirmReset ? "#fff" : C.red, border: `1px solid ${C.redB}`, padding: "8px 18px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+            >
+              {confirmReset ? "TAP AGAIN TO CONFIRM RESET" : "RESET ACCOUNT"}
+            </button>
+            {confirmReset && (
+              <button
+                onClick={() => setConfirmReset(false)}
+                style={{ marginLeft: 10, background: "#fff", color: C.text2, border: `1px solid ${C.border}`, padding: "8px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer" }}
+              >
+                CANCEL
+              </button>
+            )}
           </div>
         </div>
       )}

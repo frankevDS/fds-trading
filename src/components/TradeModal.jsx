@@ -5,8 +5,11 @@ import { Badge } from "./shared";
 import { marketBuyByQuote } from "../lib/binanceTrade";
 
 export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onClose }) {
-  const isCryptoBroker = pre?.market === "CRYPTO" && brokerConnected && !!pre?.binanceSymbol;
-  const [dir, setDir] = useState(isCryptoBroker ? "BUY" : pre?.signal?.includes("BUY") ? "BUY" : "SELL");
+  const canUseTestnet = pre?.market === "CRYPTO" && brokerConnected && !!pre?.binanceSymbol;
+  const [useTestnet, setUseTestnet] = useState(canUseTestnet);
+  const isCryptoBroker = canUseTestnet && useTestnet;
+
+  const [dir, setDir] = useState(pre?.signal?.includes("BUY") ? "BUY" : "SELL");
   const [amt, setAmt] = useState("");
   const [sl, setSl] = useState("");
   const [tp, setTp] = useState("");
@@ -77,7 +80,7 @@ export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onCl
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.65)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(5px)", padding: 16 }}>
       <div style={{ background: "#fff", borderRadius: 18, width: "100%", maxWidth: 440, padding: 26, boxShadow: "0 24px 64px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: canUseTestnet ? 10 : 20 }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>Place Trade</div>
             <div style={{ fontSize: 11, color: C.text3 }}>
@@ -88,6 +91,20 @@ export default function TradeModal({ pre, wallet, brokerConnected, onPlace, onCl
             x
           </button>
         </div>
+
+        {canUseTestnet && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+            {[{ label: "🔗 Binance Testnet", val: true }, { label: "💰 Virtual Wallet", val: false }].map((opt) => (
+              <button
+                key={String(opt.val)}
+                onClick={() => { setUseTestnet(opt.val); if (opt.val) setDir("BUY"); }}
+                style={{ flex: 1, padding: "7px 0", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: useTestnet === opt.val ? C.blue : "#fff", color: useTestnet === opt.val ? "#fff" : C.text2, border: `1px solid ${useTestnet === opt.val ? C.blue : C.border}` }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {isCryptoBroker && (
           <div style={{ background: C.blueL, border: `1px solid ${C.blueB}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: C.blue, lineHeight: 1.5 }}>
