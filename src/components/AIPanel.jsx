@@ -4,36 +4,50 @@ import { fmtP, pfx } from "../lib/indicators";
 import { Badge } from "./shared";
 
 function buildPrompt(sym, market, data) {
-  return `You are a senior trader at FDS Trading.
+  const trendStr = data.aboveSma50 ? "UPTREND (price above SMA50)" : "DOWNTREND (price below SMA50)";
+  const reasonsStr = data.sigReasons && data.sigReasons.length
+    ? data.sigReasons.join(", ")
+    : "Not specified";
+
+  return `You are a senior trader at FDS Trading. Be direct and honest — if the setup is weak or counter-trend, say so.
+
 INSTRUMENT: ${sym.label} - ${market}
-PRICE: ${fmtP(data.price, sym.id)}
-RSI: ${(data.rsi || 0).toFixed(1)} | MACD: ${(data.macd || 0).toFixed(5)}
+CURRENT PRICE: ${fmtP(data.price, sym.id)}
+TREND: ${trendStr}
+
+INDICATORS:
+RSI: ${(data.rsi || 0).toFixed(1)} | MACD: ${data.macdAboveSignal ? "above signal (bullish)" : "below signal (bearish)"}
 SMA20: ${fmtP(data.sma20 || 0, sym.id)} | SMA50: ${fmtP(data.sma50 || 0, sym.id)}
 BB%: ${(data.bbPos || 0).toFixed(1)}% | Stochastic: ${(data.stochK || 0).toFixed(1)}
 24h Change: ${(data.change24 || 0).toFixed(3)}%
+
+SIGNAL REASONS: ${reasonsStr}
+BULL SCORE: ${data.sigBull || 0} | BEAR SCORE: ${data.sigBear || 0}
+
+Respond in this exact format:
 
 SIGNAL: [STRONG_BUY/BUY/HOLD/SELL/STRONG_SELL]
 CONFIDENCE: [1-100]%
 TIMEFRAME: [INTRADAY/SWING/POSITION]
 
 📊 TECHNICAL PICTURE
-What indicators say.
+2-3 sentences on what the indicators are actually saying. Be honest if signals are mixed.
 
 🎯 TRADE SETUP
-Entry Zone: [price]
+Entry Zone: [price or range]
 Stop Loss: [price]
 Take Profit 1: [price]
 Take Profit 2: [price]
 
 ⚠️ INVALIDATION
-- [Condition 1]
-- [Condition 2]
+- [What would cancel this setup]
+- [Second condition]
 
 💡 EDGE
-One insight.
+One specific insight a junior trader would miss.
 
 🕐 TIMING
-When to watch.`;
+Best time to enter or watch for confirmation.`;
 }
 
 function parseLevel(text, label) {

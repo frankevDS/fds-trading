@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { C } from "../lib/constants";
-import { getInd, calcSig, fmtP, pfx } from "../lib/indicators";
+import { getInd, calcSig, calcSigWithReason, fmtP, pfx } from "../lib/indicators";
 import { initSim, tickSim } from "../lib/simEngine";
 import { subscribeFeed } from "../lib/binanceFeed";
 import { Spark, Badge, PBar } from "./shared";
@@ -74,8 +74,9 @@ export default function MarketCard({ sym, market, onAnalyse, onWatch, watched, o
   }
 
   const indRaw = getInd(st.history, st.price);
+  if (!indRaw) return null;
   const ind = isCrypto && live && !live.error ? { ...indRaw, change24: live.change24 } : indRaw;
-  const sig = calcSig(ind);
+  const { signal: sig, reasons: sigReasons, bull: sigBull, bear: sigBear } = calcSigWithReason(ind);
   const pos = ind.change24 >= 0;
   const flashBg = flash === "up" ? "#f0fdf4" : flash === "dn" ? "#fff5f5" : C.card;
   const flashBorder = flash === "up" ? "#86efac" : flash === "dn" ? "#fecaca" : C.border;
@@ -194,7 +195,7 @@ export default function MarketCard({ sym, market, onAnalyse, onWatch, watched, o
           justifyContent: "space-between",
           fontSize: 10,
           color: C.text2,
-          marginBottom: 12,
+          marginBottom: 8,
           padding: "6px 10px",
           background: "#f8fafc",
           borderRadius: 7,
@@ -207,6 +208,26 @@ export default function MarketCard({ sym, market, onAnalyse, onWatch, watched, o
           SMA50 <span style={{ color: C.purple, fontWeight: 600 }}>{pfx(market, sym.id)}{fmtP(ind.sma50, sym.id)}</span>
         </span>
       </div>
+
+      {/* Signal strength meter */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.text3, marginBottom: 3 }}>
+          <span>BULL {sigBull}</span>
+          <span style={{ fontWeight: 600, color: C.text2 }}>Signal strength</span>
+          <span>BEAR {sigBear}</span>
+        </div>
+        <div style={{ height: 4, borderRadius: 3, background: "#f1f5f9", overflow: "hidden", display: "flex" }}>
+          <div style={{ width: `${(sigBull / (sigBull + sigBear + 0.01)) * 100}%`, background: C.green, borderRadius: 3 }} />
+          <div style={{ width: `${(sigBear / (sigBull + sigBear + 0.01)) * 100}%`, background: C.red }} />
+        </div>
+      </div>
+
+      {/* Counter-trend warning */}
+      {sigReasons && sigReasons.some(r => r.includes("Counter-trend")) && (
+        <div style={{ background: "#fffbeb", border: `1px solid ${C.yellowB}`, borderRadius: 7, padding: "5px 8px", marginBottom: 8, fontSize: 10, color: C.yellow }}>
+          ⚠️ Counter-trend — price below SMA50. Higher risk trade.
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6 }}>
         <button
           onClick={() => onAnalyse(sym, market, { price: st.price, history: [...st.history], ...ind })}

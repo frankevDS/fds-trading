@@ -12,6 +12,8 @@ import JournalView from "./components/JournalView";
 import PortfolioView from "./components/PortfolioView";
 import BrokerView from "./components/BrokerView";
 import TradeModal from "./components/TradeModal";
+import DashboardCharts from "./components/DashboardCharts";
+import PriceAlerts from "./components/PriceAlerts";
 
 export default function App() {
   const [nav, setNav] = useState("DASHBOARD");
@@ -297,6 +299,7 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              <DashboardCharts trades={trades} wallet={wallet} />
             </div>
           )}
           {nav === "MARKETS" && (
@@ -317,6 +320,7 @@ export default function App() {
             </div>
           )}
           {nav === "SCANNER" && <Scanner onAnalyse={handleAnalyse} onTrade={handleTrade} hasBalance={hasBalance} />}
+          {nav === "ALERTS" && <div style={{ padding: "14px 14px" }}><PriceAlerts instruments={INSTRUMENTS.CRYPTO} /></div>}
           {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} /></div>}
           {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}

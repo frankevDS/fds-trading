@@ -57,6 +57,7 @@ export const NAV_ITEMS = [
   "DASHBOARD",
   "MARKETS",
   "SCANNER",
+  "ALERTS",
   "WALLET",
   "TRADES",
   "JOURNAL",
@@ -73,6 +74,7 @@ export const NAV_ICONS = {
   TRADES: "💹",
   JOURNAL: "📓",
   PORTFOLIO: "📋",
+  ALERTS: "🔔",
   BROKER: "🔗",
 };
 
