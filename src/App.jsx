@@ -16,6 +16,8 @@ import TradeModal from "./components/TradeModal";
 import DashboardCharts from "./components/DashboardCharts";
 import PriceAlerts from "./components/PriceAlerts";
 import ChartPanel from "./components/ChartPanel";
+import TelegramSettings from "./components/TelegramSettings";
+import { startSignalMonitor } from "./lib/signalMonitor";
 
 export default function App() {
   const [nav, setNav] = useState(() => storage.loadNav("DASHBOARD"));
@@ -43,7 +45,11 @@ export default function App() {
     initBinanceFeed(INSTRUMENTS.CRYPTO);
     setBrokerConnected(hasStoredBinanceKeys());
     const iv = setInterval(() => setClock(new Date()), 1000);
-    return () => clearInterval(iv);
+    const stopMonitor = startSignalMonitor();
+    return () => {
+      clearInterval(iv);
+      stopMonitor && stopMonitor();
+    };
   }, []);
 
   // Persist to localStorage whenever any of these change
@@ -340,7 +346,12 @@ export default function App() {
             </div>
           )}
           {nav === "SCANNER" && <Scanner onAnalyse={handleAnalyse} onTrade={handleTrade} hasBalance={hasBalance} />}
-          {nav === "ALERTS" && <div style={{ padding: "14px 14px" }}><PriceAlerts instruments={INSTRUMENTS.CRYPTO} /></div>}
+          {nav === "ALERTS" && (
+            <div style={{ padding: "14px 14px" }}>
+              <TelegramSettings onSettingsChange={() => {}} />
+              <PriceAlerts instruments={INSTRUMENTS.CRYPTO} />
+            </div>
+          )}
           {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} onReset={handleReset} /></div>}
           {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} onChart={setChartTrade} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}

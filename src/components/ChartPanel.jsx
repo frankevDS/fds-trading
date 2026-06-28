@@ -1,9 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
-import { C } from "../lib/constants";
+import { C, INSTRUMENTS } from "../lib/constants";
 import { fmtP, pfx, getInd } from "../lib/indicators";
 
 const REST_BASE = "https://api.binance.com";
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
+
+// Look up the Binance symbol for a trade - works for both testnet and virtual trades
+function resolveBinanceSymbol(trade) {
+  if (trade.binanceSymbol) return trade.binanceSymbol;
+  if (trade.market !== "CRYPTO") return null;
+  const instr = INSTRUMENTS.CRYPTO.find(
+    (x) => x.id === trade.id || x.label === trade.label || x.label === `${trade.label}`
+  );
+  return instr?.binanceSymbol || null;
+}
 
 async function fetchKlines(binanceSymbol, interval, limit = 120) {
   const url = `${REST_BASE}/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
@@ -181,11 +191,15 @@ export default function ChartPanel({ trade, onClose }) {
   const [error, setError] = useState("");
   const [hovered, setHovered] = useState(null);
   const isCrypto = trade.market === "CRYPTO";
-  const binanceSymbol = trade.binanceSymbol;
+  const binanceSymbol = resolveBinanceSymbol(trade);
 
   useEffect(() => {
     if (!isCrypto || !binanceSymbol) {
-      setError("Full candlestick charts are available for crypto only. Stocks/Forex use simulated prices so no real OHLC data exists.");
+      setError(
+        !isCrypto
+          ? "Full candlestick charts are available for crypto only. Stocks/Forex use simulated prices so no real OHLC data exists."
+          : `Could not find Binance symbol for ${trade.label}. Try closing and reopening the chart.`
+      );
       setLoading(false);
       return;
     }
