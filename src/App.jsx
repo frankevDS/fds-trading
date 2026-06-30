@@ -1,8 +1,16 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { C, INSTRUMENTS, NAV_ITEMS, NAV_ICONS, MKTABS, INIT_WALLET } from "./lib/constants";
 import { initBinanceFeed } from "./lib/binanceFeed";
 import { hasStoredBinanceKeys } from "./components/BrokerView";
 import { storage } from "./lib/storage";
+import { supabase, isSupabaseReady } from "./lib/supabase";
+import {
+  loadTrades, saveTrade, updateTrade,
+  loadWallet, saveWallet, addWalletHistory,
+  loadJournal, saveJournalEntry,
+  loadWatchlist, saveWatchlist,
+  loadProfile,
+} from "./lib/cloudSync";
 import { StatCard } from "./components/shared";
 import MarketCard from "./components/MarketCard";
 import AIPanel from "./components/AIPanel";
@@ -17,19 +25,29 @@ import DashboardCharts from "./components/DashboardCharts";
 import PriceAlerts from "./components/PriceAlerts";
 import ChartPanel from "./components/ChartPanel";
 import TelegramSettings from "./components/TelegramSettings";
+import AuthScreen from "./components/AuthScreen";
+import PendingApproval from "./components/PendingApproval";
+import AdminPanel from "./components/AdminPanel";
 import { startSignalMonitor } from "./lib/signalMonitor";
 
 export default function App() {
-  const [nav, setNav] = useState(() => storage.loadNav("DASHBOARD"));
-  const [mkt, setMkt] = useState(() => storage.loadMktab("CRYPTO"));
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [authUser, setAuthUser] = useState(null);      // Supabase user object
+  const [profile, setProfile] = useState(null);        // our profiles table row
+  const [authLoading, setAuthLoading] = useState(true); // checking session
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  // ── Trading state ─────────────────────────────────────────────────────────
+  const [nav, setNav] = useState("DASHBOARD");
+  const [mkt, setMkt] = useState("CRYPTO");
   const [rk, setRk] = useState(0);
   const [aiTarget, setAiTarget] = useState(null);
-  const [journal, setJournal] = useState(() => storage.loadJournal([]));
-  const [trades, setTrades] = useState(() => storage.loadTrades([]));
-  const [watchlist, setWatchlist] = useState(() => storage.loadWatchlist([]));
+  const [journal, setJournal] = useState([]);
+  const [trades, setTrades] = useState([]);
+  const [watchlist, setWatchlist] = useState([]);
   const [tradeModal, setTradeModal] = useState(null);
   const [chartTrade, setChartTrade] = useState(null);
-  const [wallet, setWallet] = useState(() => storage.loadWallet(INIT_WALLET));
+  const [wallet, setWallet] = useState(INIT_WALLET);
   const [clock, setClock] = useState(new Date());
   const [brokerConnected, setBrokerConnected] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 860);
@@ -41,6 +59,68 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // ── Auth session listener ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!supabase) {
+      // No Supabase configured - fall back to localStorage-only mode
+      setTrades(storage.loadTrades([]));
+      setWallet(storage.loadWallet(INIT_WALLET));
+      setJournal(storage.loadJournal([]));
+      setWatchlist(storage.loadWatchlist([]));
+      setNav(storage.loadNav("DASHBOARD"));
+      setMkt(storage.loadMktab("CRYPTO"));
+      setAuthLoading(false);
+      return;
+    }
+
+    // Check existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        handleSessionUser(session.user);
+      } else {
+        setAuthLoading(false);
+      }
+    });
+
+    // Listen for future auth changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        handleSessionUser(session.user);
+      } else {
+        // Logged out - clear state
+        setAuthUser(null);
+        setProfile(null);
+        setTrades([]);
+        setWallet(INIT_WALLET);
+        setJournal([]);
+        setWatchlist([]);
+        setAuthLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function handleSessionUser(user) {
+    setAuthUser(user);
+    const prof = await loadProfile(user.id);
+    setProfile(prof);
+
+    // Load all user data from Supabase
+    const [t, w, j, wl] = await Promise.all([
+      loadTrades(user.id),
+      loadWallet(user.id),
+      loadJournal(user.id),
+      loadWatchlist(user.id),
+    ]);
+    setTrades(t);
+    setWallet(w);
+    setJournal(j);
+    setWatchlist(wl);
+    setAuthLoading(false);
+  }
+
+  // ── App init (market data, monitor) ──────────────────────────────────────
   useEffect(() => {
     initBinanceFeed(INSTRUMENTS.CRYPTO);
     setBrokerConnected(hasStoredBinanceKeys());
@@ -52,7 +132,7 @@ export default function App() {
     };
   }, []);
 
-  // Persist to localStorage whenever any of these change
+  // ── Persist to localStorage as offline backup ─────────────────────────────
   useEffect(() => { storage.saveTrades(trades); }, [trades]);
   useEffect(() => { storage.saveWallet(wallet); }, [wallet]);
   useEffect(() => { storage.saveJournal(journal); }, [journal]);
@@ -60,35 +140,37 @@ export default function App() {
   useEffect(() => { storage.saveNav(nav); }, [nav]);
   useEffect(() => { storage.saveMktab(mkt); }, [mkt]);
 
-  const deposit = (amt) =>
-    setWallet((w) => ({
-      ...w,
-      balance: w.balance + amt,
-      totalDeposited: w.totalDeposited + amt,
-      history: [...w.history, { type: "DEPOSIT", amount: amt, note: "Manual deposit", date: new Date().toISOString() }],
-    }));
+  const deposit = (amt) => {
+    const entry = { type: "DEPOSIT", amount: amt, note: "Manual deposit", date: new Date().toISOString() };
+    setWallet((w) => {
+      const next = { ...w, balance: w.balance + amt, totalDeposited: w.totalDeposited + amt, history: [...w.history, entry] };
+      if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+      return next;
+    });
+  };
 
-  const withdraw = (amt) =>
-    setWallet((w) => ({
-      ...w,
-      balance: w.balance - amt,
-      history: [...w.history, { type: "WITHDRAW", amount: -amt, note: "Manual withdrawal", date: new Date().toISOString() }],
-    }));
+  const withdraw = (amt) => {
+    const entry = { type: "WITHDRAW", amount: -amt, note: "Manual withdrawal", date: new Date().toISOString() };
+    setWallet((w) => {
+      const next = { ...w, balance: w.balance - amt, history: [...w.history, entry] };
+      if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+      return next;
+    });
+  };
 
-  // Binance Testnet trades don't touch the local virtual wallet - that
-  // capital lives on the testnet account itself, fetched live in BrokerView.
   const placeTrade = (trade) => {
     if (trade.broker === "BINANCE_TESTNET") {
-      setTrades((ts) => [...ts, trade]);
+      setTrades((ts) => { const next = [...ts, trade]; if (authUser) saveTrade(authUser.id, trade); return next; });
       return;
     }
     if (trade.invested > wallet.balance) return;
-    setWallet((w) => ({
-      ...w,
-      balance: w.balance - trade.invested,
-      history: [...w.history, { type: "TRADE_OPEN", amount: -trade.invested, note: `${trade.direction} ${trade.label}`, date: new Date().toISOString() }],
-    }));
-    setTrades((ts) => [...ts, trade]);
+    const entry = { type: "TRADE_OPEN", amount: -trade.invested, note: `${trade.direction} ${trade.label}`, date: new Date().toISOString() };
+    setWallet((w) => {
+      const next = { ...w, balance: w.balance - trade.invested, history: [...w.history, entry] };
+      if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+      return next;
+    });
+    setTrades((ts) => { const next = [...ts, trade]; if (authUser) saveTrade(authUser.id, trade); return next; });
   };
 
   const closeTrade = (tradeId, closeInfo) => {
@@ -97,19 +179,16 @@ export default function App() {
     const pnl = closeInfo?.pnl || 0;
     if (t.broker !== "BINANCE_TESTNET") {
       const returned = t.invested + pnl;
-      setWallet((w) => ({
-        ...w,
-        balance: w.balance + returned,
-        history: [...w.history, { type: "TRADE_CLOSE", amount: returned, note: `Closed ${t.label} PnL $${pnl.toFixed(2)}`, date: new Date().toISOString() }],
-      }));
+      const entry = { type: "TRADE_CLOSE", amount: returned, note: `Closed ${t.label} PnL $${pnl.toFixed(2)}`, date: new Date().toISOString() };
+      setWallet((w) => {
+        const next = { ...w, balance: w.balance + returned, history: [...w.history, entry] };
+        if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+        return next;
+      });
     }
-    setTrades((ts) =>
-      ts.map((x) =>
-        x.tradeId === tradeId
-          ? { ...x, status: "CLOSED", pnl, closePrice: closeInfo?.closePrice, closeDate: closeInfo?.closeDate }
-          : x
-      )
-    );
+    const updates = { status: "CLOSED", pnl, closePrice: closeInfo?.closePrice, closeDate: closeInfo?.closeDate };
+    if (authUser) updateTrade(authUser.id, tradeId, updates);
+    setTrades((ts) => ts.map((x) => x.tradeId === tradeId ? { ...x, ...updates } : x));
   };
 
   const handleReset = () => {
@@ -119,17 +198,26 @@ export default function App() {
     setWallet(INIT_WALLET);
     setNav("DASHBOARD");
     setMkt("CRYPTO");
+    storage.clearAll();
+    // Cloud wallet will be reset on next wallet save
+    if (authUser) saveWallet(authUser.id, INIT_WALLET);
   };
 
   const handleAnalyse = (sym, market, data) => setAiTarget({ sym, market, data });
-  const handleWatch = (sym) => setWatchlist((w) => (w.includes(sym.id) ? w.filter((x) => x !== sym.id) : [...w, sym.id]));
-  const handleSaveFromAI = (sym, market, sig, price, text) => {
-    setJournal((j) => [
-      ...j,
-      { id: Date.now(), symbol: sym.label, market, signal: sig, sl: "", tp: "", result: "PENDING", pnlPct: "", notes: text.slice(0, 400), date: new Date().toISOString() },
-    ]);
+  const handleWatch = (sym) => {
+    setWatchlist((w) => {
+      const next = w.includes(sym.id) ? w.filter((x) => x !== sym.id) : [...w, sym.id];
+      if (authUser) saveWatchlist(authUser.id, next);
+      return next;
+    });
   };
-  const handleAddJournal = (entry) => setJournal((j) => [...j, entry]);
+  const handleSaveFromAI = (sym, market, sig, price, text) => {
+    const entry = { id: Date.now(), symbol: sym.label, market, signal: sig, sl: "", tp: "", result: "PENDING", pnlPct: "", notes: text.slice(0, 400), date: new Date().toISOString() };
+    setJournal((j) => { const next = [...j, entry]; if (authUser) saveJournalEntry(authUser.id, entry); return next; });
+  };
+  const handleAddJournal = (entry) => {
+    setJournal((j) => { const next = [...j, entry]; if (authUser) saveJournalEntry(authUser.id, entry); return next; });
+  };
   const handleTrade = (sym, market, sig, price, ind) =>
     setTradeModal({ id: sym.id, label: sym.label, market, signal: sig, price, ind, binanceSymbol: sym.binanceSymbol });
 
@@ -142,6 +230,25 @@ export default function App() {
   const wr = trades.length ? ((wins / trades.length) * 100).toFixed(0) : "0";
   const totalPnl = trades.reduce((a, t) => a + (t.pnl || 0), 0);
   const hasBalance = wallet.balance > 0 || brokerConnected;
+  const isAdmin = profile?.role === "admin";
+
+  // ── Auth gates ─────────────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.nav, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg,#3b82f6,#1d4ed8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 900, color: "#fff" }}>F</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Loading FDS Trading...</div>
+      </div>
+    );
+  }
+
+  if (isSupabaseReady() && !authUser) {
+    return <AuthScreen onAuth={(user) => handleSessionUser(user)} />;
+  }
+
+  if (isSupabaseReady() && authUser && profile && !profile.approved) {
+    return <PendingApproval user={authUser} />;
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "Arial,sans-serif", display: "flex" }}>
@@ -249,6 +356,29 @@ export default function App() {
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", animation: "pulse 2s ease infinite" }} />
             <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)" }}>{clock.toLocaleTimeString()}</span>
           </div>
+          {authUser && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {profile?.display_name || authUser.email}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowAdmin(true)}
+                    style={{ flex: 1, background: "rgba(124,58,237,0.25)", border: "1px solid rgba(124,58,237,0.4)", color: "#c4b5fd", padding: "4px 0", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    👑 ADMIN
+                  </button>
+                )}
+                <button
+                  onClick={() => supabase && supabase.auth.signOut()}
+                  style={{ flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", padding: "4px 0", borderRadius: 6, fontSize: 9, cursor: "pointer" }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: 8, color: "rgba(255,255,255,0.2)" }}>NOT FINANCIAL ADVICE</div>
         </div>
       </div>
@@ -369,6 +499,7 @@ export default function App() {
         <TradeModal pre={tradeModal} wallet={wallet} brokerConnected={brokerConnected} onPlace={placeTrade} onClose={() => setTradeModal(null)} />
       )}
       {chartTrade && <ChartPanel trade={chartTrade} onClose={() => setChartTrade(null)} />}
+      {showAdmin && isAdmin && <AdminPanel currentUser={authUser} onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }
