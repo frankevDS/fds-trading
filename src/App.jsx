@@ -486,7 +486,7 @@ export default function App() {
           {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} onChart={setChartTrade} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}
           {nav === "PORTFOLIO" && <div style={{ padding: "14px 14px" }}><PortfolioView trades={trades} /></div>}
-          {nav === "BROKER" && <div style={{ padding: "14px 14px" }}><BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} /></div>}
+          {nav === "BROKER" && <div style={{ padding: "14px 14px" }}><BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} userId={authUser?.id} /></div>}
         </div>
 
         <div style={{ padding: "10px 22px", borderTop: `1px solid ${C.border}`, background: "#fff", fontSize: 9, color: C.text3, textAlign: "center" }}>

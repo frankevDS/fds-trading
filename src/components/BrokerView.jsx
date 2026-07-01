@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { C } from "../lib/constants";
 import { loadKeys, saveKeys, clearKeys, testConnection, getAccount } from "../lib/binanceTrade";
+import { saveBrokerKeys, clearBrokerKeys, loadBrokerKeys } from "../lib/cloudSync";
 
 const OTHER_BROKERS = [
   { name: "Binance (live)", note: "Real-money trading - intentionally not wired up. Testnet above is the safe place to validate signals first." },
@@ -11,13 +12,27 @@ const OTHER_BROKERS = [
   { name: "Interactive Brokers", note: "Not yet connected." },
 ];
 
-export default function BrokerView({ connected, onConnected, onDisconnected }) {
+export default function BrokerView({ connected, onConnected, onDisconnected, userId }) {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [account, setAccount] = useState(null);
   const [acctErr, setAcctErr] = useState("");
+  const [syncing, setSyncing] = useState(false);
+
+  // On mount: try to load broker keys from Supabase (cross-device sync)
+  useEffect(() => {
+    if (!userId || connected) return;
+    setSyncing(true);
+    loadBrokerKeys(userId).then((keys) => {
+      if (keys?.apiKey && keys?.apiSecret) {
+        saveKeys(keys.apiKey, keys.apiSecret); // restore to localStorage
+        onConnected();
+      }
+      setSyncing(false);
+    });
+  }, [userId, connected]);
 
   useEffect(() => {
     if (!connected) return;
@@ -44,6 +59,8 @@ export default function BrokerView({ connected, onConnected, onDisconnected }) {
     try {
       await testConnection(apiKey.trim(), apiSecret.trim());
       saveKeys(apiKey.trim(), apiSecret.trim());
+      // Sync to Supabase so other devices can auto-connect
+      if (userId) await saveBrokerKeys(userId, apiKey.trim(), apiSecret.trim());
       setApiKey("");
       setApiSecret("");
       onConnected();
@@ -56,12 +73,18 @@ export default function BrokerView({ connected, onConnected, onDisconnected }) {
 
   function disconnect() {
     clearKeys();
+    if (userId) clearBrokerKeys(userId);
     setAccount(null);
     onDisconnected();
   }
 
   return (
     <div>
+      {syncing && (
+        <div style={{ background: C.blueL, border: `1px solid ${C.blueB}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 11, color: C.blue }}>
+          🔄 Checking for saved broker connection on your account...
+        </div>
+      )}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22, marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div>
