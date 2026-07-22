@@ -40,20 +40,15 @@ export async function loadTrades(userId) {
     if (error) throw error;
     const cloudTrades = (data || []).map(dbToTrade);
 
-    // MERGE: find any local trades that aren't in Supabase yet (offline trades)
+    // MERGE: find any local trades not yet in Supabase (placed while offline)
     const localTrades = storage.loadTrades([]);
     const cloudIds = new Set(cloudTrades.map((t) => String(t.tradeId)));
     const localOnly = localTrades.filter((t) => !cloudIds.has(String(t.tradeId)));
 
     if (localOnly.length > 0) {
-      // Push local-only trades up to Supabase
-      console.log(`cloudSync: syncing ${localOnly.length} local-only trades to Supabase`);
+      console.log(`cloudSync: pushing ${localOnly.length} offline trades to Supabase`);
       for (const t of localOnly) {
-        try {
-          await supabase.from("trades").upsert(tradeToDb(userId, t), { onConflict: "user_id,trade_id" });
-        } catch (e) {
-          console.warn("cloudSync: failed to push local trade", t.label, e?.message);
-        }
+        await saveTrade(userId, t);
       }
       return [...localOnly, ...cloudTrades];
     }
@@ -65,21 +60,35 @@ export async function loadTrades(userId) {
   }
 }
 
+// Insert-or-update pattern: try INSERT first, fall back to UPDATE on conflict.
+// This works without a database unique constraint unlike upsert+onConflict.
 export async function saveTrade(userId, trade) {
   if (!supabase || !userId) return;
-  // Always save to localStorage first as immediate backup
+
+  // 1. Always write to localStorage immediately as backup
   const existing = storage.loadTrades([]);
-  const next = existing.find((t) => String(t.tradeId) === String(trade.tradeId))
+  const alreadyLocal = existing.find((t) => String(t.tradeId) === String(trade.tradeId));
+  const nextLocal = alreadyLocal
     ? existing.map((t) => (String(t.tradeId) === String(trade.tradeId) ? trade : t))
     : [...existing, trade];
-  storage.saveTrades(next);
+  storage.saveTrades(nextLocal);
 
-  // Then push to Supabase with retry
-  await withRetry(
-    () => supabase.from("trades").upsert(tradeToDb(userId, trade), { onConflict: "user_id,trade_id" }),
-    3,
-    `saveTrade(${trade.label})`
-  );
+  // 2. Try INSERT — if the row doesn't exist yet
+  const row = tradeToDb(userId, trade);
+  const { error: insertErr } = await supabase.from("trades").insert(row);
+
+  if (!insertErr) return; // inserted successfully
+
+  // 3. If INSERT failed because row exists (any error code), try UPDATE instead
+  const { error: updateErr } = await supabase
+    .from("trades")
+    .update(row)
+    .eq("user_id", userId)
+    .eq("trade_id", trade.tradeId);
+
+  if (updateErr) {
+    console.warn("cloudSync saveTrade update failed:", updateErr?.message);
+  }
 }
 
 export async function updateTrade(userId, tradeId, updates) {
@@ -187,26 +196,27 @@ export async function loadJournal(userId) {
 
 export async function saveJournalEntry(userId, entry) {
   if (!supabase || !userId) return;
-  try {
-    await supabase.from("journal_entries").upsert(
-      {
-        user_id: userId,
-        entry_id: entry.id,
-        symbol: entry.symbol,
-        market: entry.market,
-        signal: entry.signal,
-        result: entry.result,
-        pnl_pct: entry.pnlPct,
-        sl: entry.sl,
-        tp: entry.tp,
-        notes: entry.notes,
-        date: entry.date,
-      },
-      { onConflict: "user_id,entry_id" }
-    );
-  } catch (e) {
-    console.warn("cloudSync saveJournalEntry:", e?.message);
-  }
+  const row = {
+    user_id: userId,
+    entry_id: entry.id,
+    symbol: entry.symbol,
+    market: entry.market,
+    signal: entry.signal,
+    result: entry.result,
+    pnl_pct: entry.pnlPct,
+    sl: entry.sl,
+    tp: entry.tp,
+    notes: entry.notes,
+    date: entry.date,
+  };
+  const { error: insertErr } = await supabase.from("journal_entries").insert(row);
+  if (!insertErr) return;
+  const { error: updateErr } = await supabase
+    .from("journal_entries")
+    .update(row)
+    .eq("user_id", userId)
+    .eq("entry_id", entry.id);
+  if (updateErr) console.warn("cloudSync saveJournalEntry update failed:", updateErr?.message);
 }
 
 // ─── Watchlist ────────────────────────────────────────────────────────────────

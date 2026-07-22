@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { C, INSTRUMENTS, NAV_ITEMS, NAV_ICONS, MKTABS, INIT_WALLET } from "./lib/constants";
 import { initBinanceFeed } from "./lib/binanceFeed";
 import { hasStoredBinanceKeys } from "./components/BrokerView";
@@ -60,9 +60,12 @@ export default function App() {
   }, []);
 
   // ── Auth session listener ─────────────────────────────────────────────────
+  // Track whether we've already loaded data - prevents TOKEN_REFRESHED events
+  // from re-running handleSessionUser and wiping trades from memory
+  const dataLoadedRef = useRef(false);
+
   useEffect(() => {
     if (!supabase) {
-      // No Supabase configured - fall back to localStorage-only mode
       setTrades(storage.loadTrades([]));
       setWallet(storage.loadWallet(INIT_WALLET));
       setJournal(storage.loadJournal([]));
@@ -73,7 +76,7 @@ export default function App() {
       return;
     }
 
-    // Check existing session
+    // Check existing session on page load
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         handleSessionUser(session.user);
@@ -82,31 +85,36 @@ export default function App() {
       }
     });
 
-    // Listen for future auth changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
+    // CRITICAL FIX: only reload data on SIGNED_IN (fresh login) or
+    // SIGNED_OUT. TOKEN_REFRESHED fires every hour and was overwriting
+    // all in-memory trades with an empty Supabase load.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && !dataLoadedRef.current) {
         handleSessionUser(session.user);
-      } else {
-        // Logged out - clear state
+      } else if (event === "SIGNED_OUT") {
+        dataLoadedRef.current = false;
         setAuthUser(null);
         setProfile(null);
         setTrades([]);
         setWallet(INIT_WALLET);
         setJournal([]);
         setWatchlist([]);
+        setBrokerConnected(false);
         setAuthLoading(false);
       }
+      // TOKEN_REFRESHED, USER_UPDATED etc. are intentionally ignored
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
   async function handleSessionUser(user) {
+    if (dataLoadedRef.current) return; // already loaded, skip
+    dataLoadedRef.current = true;
     setAuthUser(user);
     const prof = await loadProfile(user.id);
     setProfile(prof);
 
-    // Load all user data from Supabase
     const [t, w, j, wl] = await Promise.all([
       loadTrades(user.id),
       loadWallet(user.id),
@@ -133,7 +141,9 @@ export default function App() {
   }, []);
 
   // ── Persist to localStorage as offline backup ─────────────────────────────
-  useEffect(() => { storage.saveTrades(trades); }, [trades]);
+  // NOTE: trades are saved directly in placeTrade/closeTrade so we don't need
+  // an effect here - the effect would overwrite local trades with empty arrays
+  // when Supabase loads on a second device.
   useEffect(() => { storage.saveWallet(wallet); }, [wallet]);
   useEffect(() => { storage.saveJournal(journal); }, [journal]);
   useEffect(() => { storage.saveWatchlist(watchlist); }, [watchlist]);
@@ -159,36 +169,79 @@ export default function App() {
   };
 
   const placeTrade = (trade) => {
-    if (trade.broker === "BINANCE_TESTNET") {
-      setTrades((ts) => { const next = [...ts, trade]; if (authUser) saveTrade(authUser.id, trade); return next; });
-      return;
-    }
-    if (trade.invested > wallet.balance) return;
-    const entry = { type: "TRADE_OPEN", amount: -trade.invested, note: `${trade.direction} ${trade.label}`, date: new Date().toISOString() };
-    setWallet((w) => {
-      const next = { ...w, balance: w.balance - trade.invested, history: [...w.history, entry] };
-      if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+    // 1. Update React state immediately so UI responds instantly
+    setTrades((ts) => {
+      const next = [...ts, trade];
+      // 2. Save to localStorage synchronously as instant backup
+      storage.saveTrades(next);
       return next;
     });
-    setTrades((ts) => { const next = [...ts, trade]; if (authUser) saveTrade(authUser.id, trade); return next; });
+
+    // 3. Push to Supabase asynchronously (saveTrade also writes localStorage)
+    const userId = authUser?.id;
+    if (userId) {
+      saveTrade(userId, trade).catch((e) =>
+        console.warn("placeTrade Supabase save failed:", e?.message)
+      );
+    }
+
+    // 4. Update wallet for virtual trades
+    if (trade.broker !== "BINANCE_TESTNET") {
+      const entry = {
+        type: "TRADE_OPEN",
+        amount: -trade.invested,
+        note: `${trade.direction} ${trade.label}`,
+        date: new Date().toISOString(),
+      };
+      setWallet((w) => {
+        const next = { ...w, balance: w.balance - trade.invested, history: [...w.history, entry] };
+        if (userId) { saveWallet(userId, next); addWalletHistory(userId, entry); }
+        return next;
+      });
+    }
   };
 
   const closeTrade = (tradeId, closeInfo) => {
     const t = trades.find((x) => x.tradeId === tradeId);
     if (!t) return;
     const pnl = closeInfo?.pnl || 0;
+    const updates = {
+      status: "CLOSED",
+      pnl,
+      closePrice: closeInfo?.closePrice,
+      closeDate: closeInfo?.closeDate,
+    };
+
+    // 1. Update React state and localStorage immediately
+    setTrades((ts) => {
+      const next = ts.map((x) => x.tradeId === tradeId ? { ...x, ...updates } : x);
+      storage.saveTrades(next);
+      return next;
+    });
+
+    // 2. Push update to Supabase
+    const userId = authUser?.id;
+    if (userId) {
+      updateTrade(userId, tradeId, updates).catch((e) =>
+        console.warn("closeTrade Supabase update failed:", e?.message)
+      );
+    }
+
+    // 3. Return funds to wallet for virtual trades
     if (t.broker !== "BINANCE_TESTNET") {
       const returned = t.invested + pnl;
-      const entry = { type: "TRADE_CLOSE", amount: returned, note: `Closed ${t.label} PnL $${pnl.toFixed(2)}`, date: new Date().toISOString() };
+      const entry = {
+        type: "TRADE_CLOSE",
+        amount: returned,
+        note: `Closed ${t.label} PnL $${pnl.toFixed(2)}`,
+        date: new Date().toISOString(),
+      };
       setWallet((w) => {
         const next = { ...w, balance: w.balance + returned, history: [...w.history, entry] };
-        if (authUser) { saveWallet(authUser.id, next); addWalletHistory(authUser.id, entry); }
+        if (userId) { saveWallet(userId, next); addWalletHistory(userId, entry); }
         return next;
       });
     }
-    const updates = { status: "CLOSED", pnl, closePrice: closeInfo?.closePrice, closeDate: closeInfo?.closeDate };
-    if (authUser) updateTrade(authUser.id, tradeId, updates);
-    setTrades((ts) => ts.map((x) => x.tradeId === tradeId ? { ...x, ...updates } : x));
   };
 
   const handleReset = () => {
