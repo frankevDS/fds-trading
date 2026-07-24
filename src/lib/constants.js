@@ -60,8 +60,10 @@ export const NAV_ITEMS = [
   "ALERTS",
   "WALLET",
   "TRADES",
+  "HISTORY",
   "JOURNAL",
   "PORTFOLIO",
+  "BACKTEST",
   "BROKER",
 ];
 export const MKTABS = ["CRYPTO", "STOCKS", "FOREX"];
@@ -72,9 +74,11 @@ export const NAV_ICONS = {
   SCANNER: "🔍",
   WALLET: "💰",
   TRADES: "💹",
+  HISTORY: "📜",
   JOURNAL: "📓",
   PORTFOLIO: "📋",
   ALERTS: "🔔",
+  BACKTEST: "🧪",
   BROKER: "🔗",
 };
 

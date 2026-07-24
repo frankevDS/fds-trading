@@ -1,163 +1,221 @@
-// FDS Trading - background signal monitor
+// FDS Trading - Signal Monitor v2
 //
-// Runs every 30 seconds, scans all instruments, and fires a Telegram alert
-// whenever a signal score exceeds the user's confidence threshold.
-//
-// De-duplication: the same instrument won't fire again within 10 minutes to
-// avoid spamming. A fresh signal always overrides if the direction flips
-// (e.g. was BUY, now SELL).
-//
-// Confidence estimation: derived from the bull/bear score split. A net score
-// of 8 with 0 opposing score is higher confidence than a net score of 4 with
-// 3 opposing. The formula is: (net / totalPossible) * 100, clamped to [0,100].
-// This is the same signal that appears in the app UI.
+// Upgrades over v1:
+// 1. Multi-timeframe analysis (1m + 15m + 1h) using real Binance OHLCV data
+// 2. ATR-based trade levels in every Telegram alert
+// 3. VWAP, OBV, candlestick patterns included in signal scoring
+// 4. Economic calendar news warnings in alerts
+// 5. Only fires when confidence >= threshold AND multi-timeframe confirms
+// 6. 10-minute cooldown per instrument to prevent spam
 
 import { INSTRUMENTS, MKTABS } from "./constants";
-import { getInd, calcSigWithReason } from "./indicators";
+import { getIndFromCandles, calcSigWithReason, calcTradeLevels, calcMultiTimeframeSignal } from "./indicators";
 import { getFeedState } from "./binanceFeed";
 import { initSim, tickSim, getSimState } from "./simEngine";
+import { fetchMTFCandles, clearMTFCache } from "./multiTimeframe";
 import { loadTelegramSettings, formatSignalMessage, sendTelegramMessage } from "./telegramClient";
 
-const SCAN_INTERVAL_MS = 30000; // 30 seconds
-const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes per instrument
-const MAX_TOTAL_POSSIBLE_SCORE = 8; // bull + bear max combined score
-const QUALIFYING_SIGNALS = ["STRONG_BUY", "STRONG_SELL", "BUY", "SELL"];
+const SCAN_INTERVAL_MS = 30000;    // scan every 30 seconds
+const COOLDOWN_MS = 10 * 60 * 1000; // same instrument silent for 10 min
+const QUALIFYING = ["STRONG_BUY", "STRONG_SELL"];
 
-// Track last alert time per instrument+direction to avoid spam
-const lastAlerted = {}; // key: `${id}-${signal}` -> timestamp
+const lastAlerted = {};
+let upcomingNews = [];
+
+// Fetch economic calendar once on startup and refresh every 30 minutes
+async function refreshCalendar() {
+  try {
+    const r = await fetch("/api/calendar");
+    if (!r.ok) return;
+    const data = await r.json();
+    upcomingNews = data.events || [];
+  } catch {
+    upcomingNews = [];
+  }
+}
+
+function getNewsWarnings(market) {
+  const now = Date.now();
+  const window = 30 * 60 * 1000; // 30 minutes before/after event
+  const relevantCurrencies = market === "FOREX" ? ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"] : ["USD"];
+  return upcomingNews.filter((n) => {
+    const eventTime = new Date(n.date).getTime();
+    return Math.abs(eventTime - now) < window && relevantCurrencies.includes(n.currency);
+  });
+}
 
 function estimateConfidence(bull, bear) {
   const total = bull + bear;
   if (total === 0) return 0;
-  const net = Math.abs(bull - bear);
-  // Scaled: net/total gives directional purity, net/MAX gives absolute strength
-  const purity = net / total; // 1.0 = perfect, 0 = equal bull/bear
-  const strength = Math.min(net / MAX_TOTAL_POSSIBLE_SCORE, 1);
+  const purity = Math.abs(bull - bear) / total;
+  const strength = Math.min(Math.abs(bull - bear) / 10, 1);
   return Math.round((purity * 0.6 + strength * 0.4) * 100);
 }
 
-function snapshotAllInstruments() {
-  const results = [];
-  MKTABS.forEach((market) => {
-    INSTRUMENTS[market].forEach((sym) => {
-      let price, history;
-      try {
-        if (market === "CRYPTO") {
-          const f = getFeedState(sym.id);
-          if (!f || !f.ready || !f.history || f.history.length < 15) return;
-          price = f.price;
-          history = f.history;
-        } else {
-          initSim(sym.id, sym.base, sym.vol);
-          tickSim(sym.id);
-          const s = getSimState(sym.id);
-          if (!s || !s.history || s.history.length < 15) return;
-          price = s.price;
-          history = s.history;
-        }
-        const ind = getInd(history, price);
-        if (!ind) return;
-        const { signal, bull, bear, net, reasons } = calcSigWithReason(ind);
-        if (!QUALIFYING_SIGNALS.includes(signal)) return;
-        const confidence = estimateConfidence(bull, bear);
-        results.push({
-          sym,
-          market,
-          price,
-          ind,
-          signal,
-          bull,
-          bear,
-          net,
-          confidence,
-          reasons,
-        });
-      } catch {
-        // Silently skip any instrument that errors
-      }
-    });
-  });
-  return results;
+async function analyzeCryptoInstrument(sym) {
+  const feedState = getFeedState(sym.id);
+  if (!feedState || !feedState.ready) return null;
+
+  // Fetch all three timeframes in parallel
+  const { tf1m, tf15m, tf1h } = await fetchMTFCandles(sym.binanceSymbol);
+
+  if (!tf1m || tf1m.length < 20) return null;
+
+  // Calculate full indicator suite from 1m OHLCV data
+  const ind1m = getIndFromCandles(tf1m);
+  const ind15m = tf15m && tf15m.length >= 20 ? getIndFromCandles(tf15m) : null;
+  const ind1h = tf1h && tf1h.length >= 20 ? getIndFromCandles(tf1h) : null;
+
+  if (!ind1m) return null;
+
+  // Multi-timeframe signal
+  const mtf = calcMultiTimeframeSignal(ind1m, ind15m, ind1h);
+
+  // Only proceed with strong MTF-confirmed signals
+  if (!QUALIFYING.includes(mtf.signal)) return null;
+
+  const { signal, bull, bear, reasons } = calcSigWithReason(ind1m);
+  const confidence = estimateConfidence(bull, bear);
+
+  const isBuy = mtf.signal.includes("BUY");
+  const levels = calcTradeLevels(ind1m, isBuy ? "BUY" : "SELL", feedState.price);
+
+  return {
+    sym,
+    market: "CRYPTO",
+    price: feedState.price,
+    signal: mtf.signal,
+    mtf,
+    ind: ind1m,
+    bull,
+    bear,
+    reasons,
+    confidence,
+    levels,
+  };
+}
+
+function analyzeSimulatedInstrument(sym, market) {
+  initSim(sym.id, sym.base, sym.vol);
+  tickSim(sym.id);
+  const s = getSimState(sym.id);
+  if (!s || !s.history || s.history.length < 15) return null;
+
+  // For simulated instruments we only have close prices - use basic indicators
+  const { getInd } = require("./indicators"); // dynamic import workaround
+  const ind = getInd(s.history, s.price);
+  if (!ind) return null;
+
+  const { signal, bull, bear, reasons } = calcSigWithReason(ind);
+  if (!QUALIFYING.includes(signal)) return null;
+
+  const confidence = estimateConfidence(bull, bear);
+  const levels = calcTradeLevels(ind, signal.includes("BUY") ? "BUY" : "SELL", s.price);
+
+  return { sym, market, price: s.price, signal, mtf: null, ind, bull, bear, reasons, confidence, levels };
 }
 
 async function runScan() {
   const tgSettings = loadTelegramSettings();
   if (!tgSettings.chatId || !tgSettings.enabled) return;
 
-  const threshold = tgSettings.threshold || 85;
-  const signals = snapshotAllInstruments();
+  const threshold = tgSettings.threshold || 80;
   const now = Date.now();
+  const alerts = [];
 
-  for (const sig of signals) {
-    if (sig.confidence < threshold) continue;
-    // Only alert on STRONG signals unless threshold is low
-    if (threshold >= 80 && !sig.signal.startsWith("STRONG_")) continue;
+  // Scan crypto with full OHLCV multi-timeframe analysis
+  for (const sym of INSTRUMENTS.CRYPTO) {
+    try {
+      const result = await analyzeCryptoInstrument(sym);
+      if (!result) continue;
+      if (result.confidence < threshold) continue;
 
-    const cooldownKey = `${sig.sym.id}-${sig.signal}`;
-    const lastTime = lastAlerted[cooldownKey] || 0;
-    if (now - lastTime < COOLDOWN_MS) continue;
+      const cooldownKey = `${sym.id}-${result.signal}`;
+      if (now - (lastAlerted[cooldownKey] || 0) < COOLDOWN_MS) continue;
 
-    // Mark as alerted
+      alerts.push(result);
+    } catch (e) {
+      console.warn("MTF scan error:", sym.id, e?.message);
+    }
+  }
+
+  // Send alerts
+  for (const a of alerts) {
+    const cooldownKey = `${a.sym.id}-${a.signal}`;
     lastAlerted[cooldownKey] = now;
+
+    const newsWarning = getNewsWarnings(a.market);
 
     try {
       const msg = formatSignalMessage({
-        label: sig.sym.label,
-        market: sig.market,
-        direction: sig.signal.includes("BUY") ? "BUY" : "SELL",
-        price: String(sig.price?.toFixed ? sig.price.toFixed(sig.price > 100 ? 2 : 6) : sig.price),
-        sig: sig.signal,
-        confidence: sig.confidence,
-        rsi: sig.ind.rsi,
-        macd: sig.ind.macd,
-        bbPos: sig.ind.bbPos,
-        stochK: sig.ind.stochK,
-        sma20: sig.ind.sma20,
-        sma50: sig.ind.sma50,
-        aboveSma50: sig.ind.aboveSma50,
-        bull: sig.bull,
-        bear: sig.bear,
-        reasons: sig.reasons,
+        label: a.sym.label,
+        market: a.market,
+        direction: a.signal.includes("BUY") ? "BUY" : "SELL",
+        price: a.price,
+        sig: a.signal,
+        confidence: a.confidence,
+        rsi: a.ind.rsi,
+        macdAboveSignal: a.ind.macdAboveSignal,
+        bbPos: a.ind.bbPos,
+        stochK: a.ind.stochK,
+        sma20: a.ind.sma20,
+        sma50: a.ind.sma50,
+        aboveSma50: a.ind.aboveSma50,
+        aboveVwap: a.ind.aboveVwap,
+        obvTrend: a.ind.obvTrend,
+        volumeAboveAverage: a.ind.volumeAboveAverage,
+        bull: a.bull,
+        bear: a.bear,
+        reasons: a.reasons,
+        patterns: a.ind.patterns,
+        levels: a.levels,
+        mtf: a.mtf,
+        newsWarning,
+        atr: a.ind.atr,
       });
 
       await sendTelegramMessage(tgSettings.chatId, msg);
-
-      // Small delay between messages to respect Telegram rate limits
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 500)); // rate limit
     } catch (e) {
-      console.warn("FDS: Telegram alert failed for", sig.sym.label, e?.message);
+      console.warn("Telegram send failed:", a.sym.label, e?.message);
     }
   }
+
+  clearMTFCache();
 }
 
 let monitorInterval = null;
+let calendarInterval = null;
 
 export function startSignalMonitor() {
-  if (monitorInterval) return; // already running
-  // Initial scan after 10 seconds (let prices load first)
-  const initialTimeout = setTimeout(() => {
+  if (monitorInterval) return;
+
+  // Load calendar on startup
+  refreshCalendar();
+  calendarInterval = setInterval(refreshCalendar, 30 * 60 * 1000);
+
+  // First scan after 15 seconds (let market data load first)
+  const init = setTimeout(() => {
     runScan();
     monitorInterval = setInterval(runScan, SCAN_INTERVAL_MS);
-  }, 10000);
+  }, 15000);
 
-  // Return cleanup function
   return () => {
-    clearTimeout(initialTimeout);
-    if (monitorInterval) {
-      clearInterval(monitorInterval);
-      monitorInterval = null;
-    }
+    clearTimeout(init);
+    clearInterval(monitorInterval);
+    clearInterval(calendarInterval);
+    monitorInterval = null;
+    calendarInterval = null;
   };
 }
 
 export function stopSignalMonitor() {
-  if (monitorInterval) {
-    clearInterval(monitorInterval);
-    monitorInterval = null;
-  }
+  clearInterval(monitorInterval);
+  clearInterval(calendarInterval);
+  monitorInterval = null;
+  calendarInterval = null;
 }
 
-// Force an immediate scan (used when settings change)
 export function triggerImmediateScan() {
   runScan();
 }
