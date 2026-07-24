@@ -28,13 +28,16 @@ import TelegramSettings from "./components/TelegramSettings";
 import AuthScreen from "./components/AuthScreen";
 import PendingApproval from "./components/PendingApproval";
 import AdminPanel from "./components/AdminPanel";
+import TradeHistory from "./components/TradeHistory";
+import Backtest from "./components/Backtest";
 import { startSignalMonitor } from "./lib/signalMonitor";
 
 export default function App() {
   // ── Auth state ────────────────────────────────────────────────────────────
-  const [authUser, setAuthUser] = useState(null);      // Supabase user object
-  const [profile, setProfile] = useState(null);        // our profiles table row
-  const [authLoading, setAuthLoading] = useState(true); // checking session
+  const [authUser, setAuthUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
 
   // ── Trading state ─────────────────────────────────────────────────────────
@@ -60,8 +63,11 @@ export default function App() {
   }, []);
 
   // ── Auth session listener ─────────────────────────────────────────────────
-  // Track whether we've already loaded data - prevents TOKEN_REFRESHED events
-  // from re-running handleSessionUser and wiping trades from memory
+  // dataLoadedRef prevents TOKEN_REFRESHED from reloading data.
+  // It is reset to false on every page load and on sign-out.
+  // getSession() handles the "already logged in" case on load.
+  // onAuthStateChange SIGNED_IN handles fresh logins.
+  // Both correctly skip TOKEN_REFRESHED which was the original bug.
   const dataLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -76,25 +82,29 @@ export default function App() {
       return;
     }
 
-    // Check existing session on page load
+    // On every page load: check for existing Supabase session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
+        // Fresh page load with existing session — always reload data
         handleSessionUser(session.user);
       } else {
         setAuthLoading(false);
       }
     });
 
-    // CRITICAL FIX: only reload data on SIGNED_IN (fresh login) or
-    // SIGNED_OUT. TOKEN_REFRESHED fires every hour and was overwriting
-    // all in-memory trades with an empty Supabase load.
+    // Auth event listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && !dataLoadedRef.current) {
-        handleSessionUser(session.user);
+      if (event === "SIGNED_IN") {
+        // Only handle SIGNED_IN if getSession didn't already load data
+        if (!dataLoadedRef.current) {
+          handleSessionUser(session.user);
+        }
       } else if (event === "SIGNED_OUT") {
+        // Reset everything on logout
         dataLoadedRef.current = false;
         setAuthUser(null);
         setProfile(null);
+        setProfileLoading(true);
         setTrades([]);
         setWallet(INIT_WALLET);
         setJournal([]);
@@ -102,18 +112,26 @@ export default function App() {
         setBrokerConnected(false);
         setAuthLoading(false);
       }
-      // TOKEN_REFRESHED, USER_UPDATED etc. are intentionally ignored
+      // TOKEN_REFRESHED, USER_UPDATED — intentionally ignored
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
   async function handleSessionUser(user) {
-    if (dataLoadedRef.current) return; // already loaded, skip
+    if (dataLoadedRef.current) return;
     dataLoadedRef.current = true;
     setAuthUser(user);
+    setProfileLoading(true);
+
     const prof = await loadProfile(user.id);
     setProfile(prof);
+    setProfileLoading(false);
+
+    if (prof && !prof.approved) {
+      setAuthLoading(false);
+      return;
+    }
 
     const [t, w, j, wl] = await Promise.all([
       loadTrades(user.id),
@@ -126,6 +144,21 @@ export default function App() {
     setJournal(j);
     setWatchlist(wl);
     setAuthLoading(false);
+  }
+
+  // Manual refresh — lets user force-sync data from any device
+  async function handleManualRefresh() {
+    if (!authUser) return;
+    const [t, w, j, wl] = await Promise.all([
+      loadTrades(authUser.id),
+      loadWallet(authUser.id),
+      loadJournal(authUser.id),
+      loadWatchlist(authUser.id),
+    ]);
+    setTrades(t);
+    setWallet(w);
+    setJournal(j);
+    setWatchlist(wl);
   }
 
   // ── App init (market data, monitor) ──────────────────────────────────────
@@ -286,11 +319,15 @@ export default function App() {
   const isAdmin = profile?.role === "admin";
 
   // ── Auth gates ─────────────────────────────────────────────────────────────
-  if (authLoading) {
+  // Show loading spinner while checking session OR while loading profile
+  // profileLoading=true prevents users from bypassing approval while profile is null
+  if (authLoading || (authUser && profileLoading)) {
     return (
       <div style={{ minHeight: "100vh", background: C.nav, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
         <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg,#3b82f6,#1d4ed8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 900, color: "#fff" }}>F</div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Loading FDS Trading...</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
+          {authUser ? "Checking account status..." : "Loading FDS Trading..."}
+        </div>
       </div>
     );
   }
@@ -299,8 +336,27 @@ export default function App() {
     return <AuthScreen onAuth={(user) => handleSessionUser(user)} />;
   }
 
+  // Block non-approved users — profile is guaranteed loaded here (profileLoading=false)
   if (isSupabaseReady() && authUser && profile && !profile.approved) {
     return <PendingApproval user={authUser} />;
+  }
+
+  // If profile failed to load entirely, show a safe error rather than letting user through
+  if (isSupabaseReady() && authUser && !profile) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.nav, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20 }}>
+        <div style={{ background: "#fff", borderRadius: 14, padding: 28, maxWidth: 400, textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Account setup incomplete</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.6 }}>
+            Your account exists but the profile record is missing. This can happen if the database trigger didn't fire on signup. Please contact the admin at frankevgloballtd@gmail.com with your email address to get approved manually.
+          </div>
+          <button onClick={() => supabase && supabase.auth.signOut()} style={{ background: "#0f172a", color: "#fff", border: "none", padding: "10px 22px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -393,6 +449,11 @@ export default function App() {
                   {openTrades}
                 </span>
               )}
+              {item === "HISTORY" && trades.filter((t) => t.status === "CLOSED").length > 0 && (
+                <span style={{ position: "absolute", right: 10, background: "#64748b", color: "#fff", borderRadius: 8, padding: "1px 5px", fontSize: 8, fontWeight: 700 }}>
+                  {trades.filter((t) => t.status === "CLOSED").length}
+                </span>
+              )}
               {item === "JOURNAL" && journal.length > 0 && (
                 <span style={{ position: "absolute", right: 10, background: "#3b82f6", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>
                   {journal.length}
@@ -405,27 +466,37 @@ export default function App() {
           ))}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", animation: "pulse 2s ease infinite" }} />
             <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)" }}>{clock.toLocaleTimeString()}</span>
           </div>
           {authUser && (
             <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {profile?.display_name || authUser.email}
+              {/* User info */}
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, background: isAdmin ? "rgba(124,58,237,0.4)" : "rgba(59,130,246,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: isAdmin ? "#c4b5fd" : "#93c5fd", fontWeight: 700, flexShrink: 0 }}>
+                  {isAdmin ? "👑" : "T"}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 9, color: isAdmin ? "#c4b5fd" : "#93c5fd", fontWeight: 700 }}>{isAdmin ? "ADMIN" : "TRADER"}</div>
+                  <div style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>
+                    {profile?.display_name || authUser.email}
+                  </div>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              {/* Buttons */}
+              <div style={{ display: "flex", gap: 5 }}>
                 {isAdmin && (
                   <button
                     onClick={() => setShowAdmin(true)}
-                    style={{ flex: 1, background: "rgba(124,58,237,0.25)", border: "1px solid rgba(124,58,237,0.4)", color: "#c4b5fd", padding: "4px 0", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}
+                    style={{ flex: 1, background: "rgba(124,58,237,0.35)", border: "1px solid rgba(167,139,250,0.5)", color: "#c4b5fd", padding: "6px 0", borderRadius: 7, fontSize: 10, fontWeight: 800, cursor: "pointer", letterSpacing: "0.02em" }}
                   >
-                    👑 ADMIN
+                    👑 ADMIN PANEL
                   </button>
                 )}
                 <button
-                  onClick={() => supabase && supabase.auth.signOut()}
-                  style={{ flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", padding: "4px 0", borderRadius: 6, fontSize: 9, cursor: "pointer" }}
+                  onClick={() => { dataLoadedRef.current = false; supabase && supabase.auth.signOut(); }}
+                  style={{ flex: isAdmin ? "0 0 60px" : 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", padding: "6px 0", borderRadius: 7, fontSize: 9, cursor: "pointer" }}
                 >
                   Sign Out
                 </button>
@@ -464,11 +535,7 @@ export default function App() {
           {nav === "MARKETS" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {MKTABS.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setMkt(t)}
-                  style={{ background: mkt === t ? C.blue : "#fff", color: mkt === t ? "#fff" : C.text2, border: `1px solid ${mkt === t ? C.blue : C.border}`, padding: "6px 14px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
-                >
+                <button key={t} onClick={() => setMkt(t)} style={{ background: mkt === t ? C.blue : "#fff", color: mkt === t ? "#fff" : C.text2, border: `1px solid ${mkt === t ? C.blue : C.border}`, padding: "6px 14px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
                   {t}
                 </button>
               ))}
@@ -476,6 +543,11 @@ export default function App() {
                 Refresh
               </button>
             </div>
+          )}
+          {authUser && nav !== "MARKETS" && (
+            <button onClick={handleManualRefresh} title="Sync latest data from all your devices" style={{ background: "#f1f5f9", border: `1px solid ${C.border}`, color: C.text2, padding: "6px 12px", borderRadius: 8, fontSize: 11, cursor: "pointer" }}>
+              🔄 Sync
+            </button>
           )}
         </div>
 
@@ -537,8 +609,10 @@ export default function App() {
           )}
           {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} onReset={handleReset} /></div>}
           {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} onChart={setChartTrade} /></div>}
+          {nav === "HISTORY" && <div style={{ padding: "14px 14px" }}><TradeHistory trades={trades} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}
           {nav === "PORTFOLIO" && <div style={{ padding: "14px 14px" }}><PortfolioView trades={trades} /></div>}
+          {nav === "BACKTEST" && <Backtest />}
           {nav === "BROKER" && <div style={{ padding: "14px 14px" }}><BrokerView connected={brokerConnected} onConnected={() => setBrokerConnected(true)} onDisconnected={() => setBrokerConnected(false)} userId={authUser?.id} /></div>}
         </div>
 
