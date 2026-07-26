@@ -344,6 +344,58 @@ export async function loadUserTrades(userId) {
   }
 }
 
+const ADMIN_EMAIL = "frankevgloballtd@gmail.com";
+
+export async function loadOrCreateProfile(userId, email) {
+  if (!supabase) return null;
+
+  // 1. Try to load existing profile
+  try {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .single();
+    if (!error && data) return data;
+  } catch (e) {
+    console.warn("loadOrCreateProfile – load failed:", e?.message);
+  }
+
+  // 2. Profile missing or blocked — create it on the fly
+  const isAdmin = email === ADMIN_EMAIL;
+  try {
+    const { data, error } = await supabase
+      .from("profiles")
+      .upsert(
+        { id: userId, email, role: isAdmin ? "admin" : "user", approved: isAdmin },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (!error && data) return data;
+    console.warn("loadOrCreateProfile – upsert failed:", error?.message);
+  } catch (e) {
+    console.warn("loadOrCreateProfile – upsert threw:", e?.message);
+  }
+
+  // 3. Also try to create the wallet row in case it's missing
+  try {
+    await supabase
+      .from("wallets")
+      .upsert({ user_id: userId, balance: 10000, total_deposited: 10000 }, { onConflict: "user_id" });
+  } catch (e) {
+    console.warn("loadOrCreateProfile – wallet upsert failed:", e?.message);
+  }
+
+  // 4. Last resort: return a synthetic profile for the admin so they ALWAYS get in
+  //    For non-admin, return null so they see the pending screen safely
+  if (isAdmin) {
+    return { id: userId, email, role: "admin", approved: true };
+  }
+  return null;
+}
+
+// Keep loadProfile for backward compatibility
 export async function loadProfile(userId) {
   if (!supabase) return null;
   try {
