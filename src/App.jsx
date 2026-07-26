@@ -9,7 +9,7 @@ import {
   loadWallet, saveWallet, addWalletHistory,
   loadJournal, saveJournalEntry,
   loadWatchlist, saveWatchlist,
-  loadProfile,
+  loadOrCreateProfile,
 } from "./lib/cloudSync";
 import { StatCard } from "./components/shared";
 import MarketCard from "./components/MarketCard";
@@ -124,7 +124,8 @@ export default function App() {
     setAuthUser(user);
     setProfileLoading(true);
 
-    const prof = await loadProfile(user.id);
+    // Load/create profile — never returns null for admin email
+    const prof = await loadOrCreateProfile(user.id, user.email);
     setProfile(prof);
     setProfileLoading(false);
 
@@ -336,24 +337,51 @@ export default function App() {
     return <AuthScreen onAuth={(user) => handleSessionUser(user)} />;
   }
 
-  // Block non-approved users — profile is guaranteed loaded here (profileLoading=false)
+  // Block non-approved users
   if (isSupabaseReady() && authUser && profile && !profile.approved) {
     return <PendingApproval user={authUser} />;
   }
 
-  // If profile failed to load entirely, show a safe error rather than letting user through
+  // If profile is still null after loadOrCreateProfile, the admin always gets a
+  // synthetic profile so this should only happen for non-admin users with
+  // genuine database issues. Show a retry screen instead of a hard block.
   if (isSupabaseReady() && authUser && !profile) {
     return (
-      <div style={{ minHeight: "100vh", background: C.nav, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20 }}>
-        <div style={{ background: "#fff", borderRadius: 14, padding: 28, maxWidth: 400, textAlign: "center" }}>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>⚠️</div>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Account setup incomplete</div>
-          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.6 }}>
-            Your account exists but the profile record is missing. This can happen if the database trigger didn't fire on signup. Please contact the admin at frankevgloballtd@gmail.com with your email address to get approved manually.
+      <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20 }}>
+        <div style={{ background: "#fff", borderRadius: 14, padding: 28, maxWidth: 420, textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Setting up your account...</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 20, lineHeight: 1.6 }}>
+            Your account is logged in but the profile is still loading. This sometimes happens on the first login.
+            Please wait a moment then click Retry, or sign out and sign back in.
           </div>
-          <button onClick={() => supabase && supabase.auth.signOut()} style={{ background: "#0f172a", color: "#fff", border: "none", padding: "10px 22px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
-            Sign Out
-          </button>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <button
+              onClick={async () => {
+                dataLoadedRef.current = false;
+                const prof = await loadOrCreateProfile(authUser.id, authUser.email);
+                setProfile(prof);
+                if (prof && (prof.approved || prof.role === "admin")) {
+                  const [t, w, j, wl] = await Promise.all([
+                    loadTrades(authUser.id),
+                    loadWallet(authUser.id),
+                    loadJournal(authUser.id),
+                    loadWatchlist(authUser.id),
+                  ]);
+                  setTrades(t); setWallet(w); setJournal(j); setWatchlist(wl);
+                }
+              }}
+              style={{ background: "#2563eb", color: "#fff", border: "none", padding: "10px 22px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => { dataLoadedRef.current = false; supabase && supabase.auth.signOut(); }}
+              style={{ background: "#fff", color: "#64748b", border: "1px solid #e2e8f0", padding: "10px 22px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
     );
