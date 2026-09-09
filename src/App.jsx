@@ -31,6 +31,8 @@ import AdminPanel from "./components/AdminPanel";
 import TradeHistory from "./components/TradeHistory";
 import Backtest from "./components/Backtest";
 import { startSignalMonitor } from "./lib/signalMonitor";
+import AutoTrader from "./components/AutoTrader";
+import { initAutoTrader, startAutoTrader, stopAutoTrader, loadAutoSettings } from "./lib/autoTrader";
 
 export default function App() {
   // ── Auth state ────────────────────────────────────────────────────────────
@@ -53,6 +55,7 @@ export default function App() {
   const [wallet, setWallet] = useState(INIT_WALLET);
   const [clock, setClock] = useState(new Date());
   const [brokerConnected, setBrokerConnected] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(() => { try { return JSON.parse(localStorage.getItem("fds_autotrader_settings") || "{}").enabled || false; } catch { return false; } });
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 860);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -168,11 +171,27 @@ export default function App() {
     setBrokerConnected(hasStoredBinanceKeys());
     const iv = setInterval(() => setClock(new Date()), 1000);
     const stopMonitor = startSignalMonitor();
+
+    // Give AutoTrader access to live placeTrade and state
+    // We use a ref-based getter so AutoTrader always sees current wallet/trades
+    initAutoTrader(
+      (trade) => placeTrade(trade),
+      () => ({ balance: wallet.balance, trades })
+    );
+
+    // Resume AutoTrader if it was running when the page last closed
+    let stopAuto = null;
+    const autoSettings = loadAutoSettings();
+    if (autoSettings.enabled) {
+      stopAuto = startAutoTrader();
+    }
+
     return () => {
       clearInterval(iv);
       stopMonitor && stopMonitor();
+      stopAuto && stopAuto();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persist to localStorage as offline backup ─────────────────────────────
   // NOTE: trades are saved directly in placeTrade/closeTrade so we don't need
@@ -637,6 +656,7 @@ export default function App() {
           )}
           {nav === "WALLET" && <div style={{ padding: "14px 14px" }}><WalletView wallet={wallet} onDeposit={deposit} onWithdraw={withdraw} trades={trades} onReset={handleReset} /></div>}
           {nav === "TRADES" && <div style={{ padding: "14px 14px" }}><TradesView trades={trades} onCloseTrade={closeTrade} onChart={setChartTrade} /></div>}
+          {nav === "AUTOTRADER" && <AutoTrader wallet={wallet} trades={trades} isRunning={autoRunning} onToggle={(on) => { setAutoRunning(on); if(on) startAutoTrader(); else stopAutoTrader(); }} />}
           {nav === "HISTORY" && <div style={{ padding: "14px 14px" }}><TradeHistory trades={trades} /></div>}
           {nav === "JOURNAL" && <div style={{ padding: "14px 14px" }}><JournalView entries={journal} onAdd={handleAddJournal} /></div>}
           {nav === "PORTFOLIO" && <div style={{ padding: "14px 14px" }}><PortfolioView trades={trades} /></div>}
