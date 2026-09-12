@@ -33,6 +33,7 @@ import Backtest from "./components/Backtest";
 import { startSignalMonitor } from "./lib/signalMonitor";
 import AutoTrader from "./components/AutoTrader";
 import { initAutoTrader, startAutoTrader, stopAutoTrader, loadAutoSettings } from "./lib/autoTrader";
+import { initSlTpMonitor, startSlTpMonitor } from "./lib/slTpMonitor";
 
 export default function App() {
   // ── Auth state ────────────────────────────────────────────────────────────
@@ -71,7 +72,13 @@ export default function App() {
   // getSession() handles the "already logged in" case on load.
   // onAuthStateChange SIGNED_IN handles fresh logins.
   // Both correctly skip TOKEN_REFRESHED which was the original bug.
-  const dataLoadedRef = useRef(false);
+  const dataLoadedRef  = useRef(false);
+  const walletRef      = useRef(wallet);
+  const tradesRef      = useRef(trades);
+
+  // Keep refs in sync with state so background workers see live values
+  useEffect(() => { walletRef.current = wallet; }, [wallet]);
+  useEffect(() => { tradesRef.current = trades; }, [trades]);
 
   useEffect(() => {
     if (!supabase) {
@@ -172,14 +179,23 @@ export default function App() {
     const iv = setInterval(() => setClock(new Date()), 1000);
     const stopMonitor = startSignalMonitor();
 
-    // Give AutoTrader access to live placeTrade and state
-    // We use a ref-based getter so AutoTrader always sees current wallet/trades
+    // Wire AutoTrader with live ref getters — always sees current balance and trades
     initAutoTrader(
       (trade) => placeTrade(trade),
-      () => ({ balance: wallet.balance, trades })
+      () => walletRef.current.balance,
+      () => tradesRef.current
     );
 
-    // Resume AutoTrader if it was running when the page last closed
+    // Wire SL/TP monitor with live ref getters
+    initSlTpMonitor(
+      () => tradesRef.current,
+      (tradeId, closeInfo) => closeTrade(tradeId, closeInfo)
+    );
+
+    // Start SL/TP auto-execution monitor (always on)
+    const stopSlTp = startSlTpMonitor();
+
+    // Resume AutoTrader if it was enabled when the page last closed
     let stopAuto = null;
     const autoSettings = loadAutoSettings();
     if (autoSettings.enabled) {
@@ -189,6 +205,7 @@ export default function App() {
     return () => {
       clearInterval(iv);
       stopMonitor && stopMonitor();
+      stopSlTp && stopSlTp();
       stopAuto && stopAuto();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
