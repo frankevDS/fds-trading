@@ -1,42 +1,99 @@
-// FDS Trading - shared security helpers for serverless functions
-//
-// Two layers, both basic but meaningful for a personal project:
-//
-// 1. Origin check - rejects requests whose Origin header doesn't match this
-//    deployment's own domain. A browser can't fake this header, so it stops
-//    other websites' JavaScript from quietly calling your API and burning
-//    your AI quota or hammering your Binance Testnet keys. It does NOT stop
-//    someone deliberately scripting a direct request with a forged header
-//    (no server-side check can fully prevent that) - for real protection of
-//    paid resources, pair this with usage alerts/limits on the Groq/
-//    Anthropic dashboard itself.
-//
-// 2. Per-IP rate limiting - a simple in-memory counter. Serverless
-//    functions can spin up fresh instances at any time, so this resets
-//    occasionally rather than being a perfectly global limit - but it still
-//    blocks the common case of one IP hammering the same warm function
-//    repeatedly in a short window.
+import { checkOrigin, rateLimit } from "./_security.js";
 
-const hits = new Map(); // ip -> [timestamps]
+// Model fallback chain - if one is deprecated, next is tried automatically
+const GROQ_MODELS = [
+  "openai/gpt-oss-120b",
+  "qwen/qwen3.6-27b",
+  "qwen/qwen3-32b",
+  "openai/gpt-oss-20b",
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "llama3-70b-8192",
+  "llama3-8b-8192",
+];
 
-export function checkOrigin(req) {
-  const origin = req.headers.origin;
-  const host = req.headers.host;
-  if (!origin || !host) return true; // same-origin requests from some clients omit Origin - allow
-  try {
-    const originHost = new URL(origin).host;
-    return originHost === host || originHost === "localhost:5173";
-  } catch {
-    return false;
-  }
+const MODEL_ERROR_PHRASES = [
+  "does not exist", "model_not_found", "model not found",
+  "do not have access", "decommissioned", "deprecated",
+  "not available", "invalid model",
+];
+
+function isModelError(msg) {
+  const l = (msg || "").toLowerCase();
+  return MODEL_ERROR_PHRASES.some((e) => l.includes(e));
 }
 
-export function rateLimit(req, { windowMs = 60000, max = 20 } = {}) {
-  const ip =
-    (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket?.remoteAddress || "unknown";
-  const now = Date.now();
-  const arr = (hits.get(ip) || []).filter((t) => now - t < windowMs);
-  arr.push(now);
-  hits.set(ip, arr);
-  return arr.length <= max;
+async function callGroq(apiKey, prompt) {
+  const preferModel = process.env.GROQ_MODEL || null;
+  const models = preferModel
+    ? [preferModel, ...GROQ_MODELS.filter((m) => m !== preferModel)]
+    : GROQ_MODELS;
+
+  let lastError = null;
+  for (const model of models) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model, max_tokens: 1200, temperature: 0.3,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const errMsg = data?.error?.message || `HTTP ${res.status}`;
+        if (isModelError(errMsg)) { lastError = errMsg; continue; }
+        throw new Error(errMsg);
+      }
+      const text = data?.choices?.[0]?.message?.content || "";
+      if (!text) throw new Error("Empty response");
+      return { text, model, provider: "groq" };
+    } catch (e) {
+      if (isModelError(e?.message)) { lastError = e.message; continue; }
+      throw e;
+    }
+  }
+  throw new Error(`All Groq models unavailable. Last: ${lastError}`);
+}
+
+async function callAnthropic(apiKey, prompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, messages: [{ role: "user", content: prompt }] }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || `Anthropic HTTP ${res.status}`);
+  const text = data?.content?.[0]?.text || "";
+  if (!text) throw new Error("Empty response from Anthropic");
+  return { text, model: "claude-sonnet-4-6", provider: "anthropic" };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!checkOrigin(req)) return res.status(403).json({ error: "Forbidden" });
+  if (!rateLimit(req, { windowMs: 60000, max: 20 })) return res.status(429).json({ error: "Too many requests" });
+
+  const { prompt } = req.body || {};
+  if (!prompt || typeof prompt !== "string" || prompt.length > 8000)
+    return res.status(400).json({ error: "Invalid prompt" });
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const groqKey      = process.env.GROQ_API_KEY;
+  const forceGroq    = process.env.AI_PROVIDER === "groq";
+
+  try {
+    let result;
+    if (anthropicKey && !forceGroq) {
+      result = await callAnthropic(anthropicKey, prompt);
+    } else if (groqKey) {
+      result = await callGroq(groqKey, prompt);
+    } else {
+      return res.status(500).json({ error: "No AI key configured. Add GROQ_API_KEY or ANTHROPIC_API_KEY in Vercel." });
+    }
+    return res.status(200).json({ text: result.text, model: result.model, provider: result.provider });
+  } catch (err) {
+    console.error("analyze error:", err?.message);
+    return res.status(500).json({ error: err?.message || "AI analysis failed" });
+  }
 }
