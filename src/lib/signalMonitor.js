@@ -1,16 +1,11 @@
-// FDS Trading - Signal Monitor v3
-// Now uses candleSignal.js (stable 15m closed candles) instead of tick feed.
-// Scans every 15 minutes to match the candle period.
-
 import { scanAllCrypto } from "./candleSignal";
 import { INSTRUMENTS } from "./constants";
 import { loadTelegramSettings, formatSignalMessage, sendTelegramMessage } from "./telegramClient";
 
-const SCAN_MS     = 15 * 60 * 1000; // every 15 minutes (matches candle period)
-const COOLDOWN_MS = 15 * 60 * 1000; // one alert per instrument per candle
+const SCAN_MS     = 15 * 60 * 1000;
+const COOLDOWN_MS = 15 * 60 * 1000;
 const lastAlerted = {};
-
-let upcomingNews = [];
+let upcomingNews  = [];
 
 async function refreshCalendar() {
   try {
@@ -22,30 +17,24 @@ async function refreshCalendar() {
 }
 
 function getNewsWarnings() {
-  const now = Date.now();
-  const window = 30 * 60 * 1000;
-  return upcomingNews.filter((n) => Math.abs(new Date(n.date).getTime() - now) < window);
+  const now = Date.now(), w = 30*60*1000;
+  return upcomingNews.filter((n) => Math.abs(new Date(n.date).getTime() - now) < w);
 }
 
 async function runScan() {
   const tgSettings = loadTelegramSettings();
   if (!tgSettings.chatId || !tgSettings.enabled) return;
-
   const threshold = tgSettings.threshold || 80;
   const now = Date.now();
-
   const results = await scanAllCrypto(INSTRUMENTS.CRYPTO);
 
   for (const r of results) {
     if (r.signal !== "STRONG_BUY" && r.signal !== "STRONG_SELL") continue;
     if (r.confidence < threshold) continue;
     if (r.trendBlocked) continue;
-
     const key = `${r.sym.id}-${r.signal}`;
     if (now - (lastAlerted[key] || 0) < COOLDOWN_MS) continue;
     lastAlerted[key] = now;
-
-    const newsWarning = getNewsWarnings();
 
     try {
       const msg = formatSignalMessage({
@@ -60,38 +49,31 @@ async function runScan() {
         obvTrend: r.ind?.obvTrend, volumeAboveAverage: r.ind?.volumeAboveAverage,
         bull: r.bull, bear: r.bear, reasons: r.reasons,
         patterns: r.ind?.patterns, levels: r.levels, mtf: r.mtf,
-        newsWarning, atr: r.ind?.atr,
+        newsWarning: getNewsWarnings(), atr: r.ind?.atr,
       });
-
       await sendTelegramMessage(tgSettings.chatId, msg);
       await new Promise((res) => setTimeout(res, 500));
-    } catch (e) {
-      console.warn("signalMonitor Telegram failed:", r.sym.label, e?.message);
-    }
+    } catch (e) { console.warn("signalMonitor:", r.sym.label, e?.message); }
   }
 }
 
-let monitorInterval   = null;
-let calendarInterval  = null;
+let monitorInterval = null, calendarInterval = null;
 
 export function startSignalMonitor() {
   if (monitorInterval) return () => {};
   refreshCalendar();
-  calendarInterval = setInterval(refreshCalendar, 30 * 60 * 1000);
-  const init = setTimeout(runScan, 20000); // first scan after 20s
+  calendarInterval = setInterval(refreshCalendar, 30*60*1000);
+  const init = setTimeout(runScan, 20000);
   monitorInterval = setInterval(runScan, SCAN_MS);
   return () => {
     clearTimeout(init);
     clearInterval(monitorInterval);
     clearInterval(calendarInterval);
-    monitorInterval = null;
-    calendarInterval = null;
+    monitorInterval = null; calendarInterval = null;
   };
 }
 
 export function stopSignalMonitor() {
-  clearInterval(monitorInterval);
-  clearInterval(calendarInterval);
-  monitorInterval = null;
-  calendarInterval = null;
+  clearInterval(monitorInterval); clearInterval(calendarInterval);
+  monitorInterval = null; calendarInterval = null;
 }
