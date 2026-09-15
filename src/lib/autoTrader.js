@@ -15,7 +15,7 @@ export function saveAutoSettings(s) { localStorage.setItem(STORAGE_KEY, JSON.str
 function loadState() { try { return JSON.parse(localStorage.getItem(STATE_KEY) || "{}"); } catch { return {}; } }
 function saveState(s) { localStorage.setItem(STATE_KEY, JSON.stringify(s)); }
 function isOnCooldown(id) { const s = loadState(); return Date.now() - (s[id] || 0) < COOLDOWN_MS; }
-function markTraded(id) { const s = loadState(); s[id] = Date.now(); saveState(s); }
+function markTraded(id)   { const s = loadState(); s[id] = Date.now(); saveState(s); }
 
 function calcPositionSize(balance, entryPrice, atr, riskPct = 0.02) {
   const riskAmount = balance * riskPct;
@@ -24,8 +24,7 @@ function calcPositionSize(balance, entryPrice, atr, riskPct = 0.02) {
 }
 
 let autoInterval = null;
-
-// Live refs pattern — always sees current wallet/trades, not a stale snapshot
+// Live refs — always sees current wallet/trades, not stale snapshots
 const liveRefs = { placeTrade: null, getBalance: null, getTrades: null };
 
 export function initAutoTrader(placeFn, getBalanceFn, getTradesFn) {
@@ -37,7 +36,6 @@ export function initAutoTrader(placeFn, getBalanceFn, getTradesFn) {
 async function runAutoScan() {
   const settings = loadAutoSettings();
   if (!settings.enabled) return;
-
   const balance = liveRefs.getBalance ? liveRefs.getBalance() : 0;
   const trades  = liveRefs.getTrades  ? liveRefs.getTrades()  : [];
   if (!balance || balance <= 0) return;
@@ -45,9 +43,14 @@ async function runAutoScan() {
   const openAuto = trades.filter((t) => t.status === "OPEN" && t.broker === "AUTO");
   if (openAuto.length >= (settings.maxTrades || 3)) return;
 
-  const todayAuto = trades.filter((t) => new Date(t.openDate).toDateString() === new Date().toDateString() && t.broker === "AUTO");
-  const dailyPnl  = todayAuto.reduce((a, t) => a + (t.pnl || 0), 0);
-  if (Math.abs(Math.min(0, dailyPnl)) / balance > 0.10) { console.log("AutoTrader: drawdown limit"); return; }
+  const todayAuto = trades.filter((t) =>
+    new Date(t.openDate).toDateString() === new Date().toDateString() && t.broker === "AUTO"
+  );
+  const dailyPnl = todayAuto.reduce((a, t) => a + (t.pnl || 0), 0);
+  if (Math.abs(Math.min(0, dailyPnl)) / balance > 0.10) {
+    console.log("AutoTrader: drawdown limit reached, pausing today");
+    return;
+  }
 
   const results = await scanAllCrypto(INSTRUMENTS.CRYPTO);
   const openIds  = new Set(trades.filter((t) => t.status === "OPEN").map((t) => t.id));
@@ -95,7 +98,8 @@ async function runAutoScan() {
           bull: r.bull, bear: r.bear, reasons: r.reasons,
           patterns: r.ind.patterns, levels: r.levels, mtf: r.mtf, atr: r.ind.atr,
         });
-        await sendTelegramMessage(tgSet.chatId, `🤖 <b>AUTO TRADE — $${invested.toFixed(2)}</b>\n\n` + msg);
+        await sendTelegramMessage(tgSet.chatId,
+          `🤖 <b>AUTO TRADE PLACED — $${invested.toFixed(2)}</b>\n\n` + msg);
       } catch (e) { console.warn("AutoTrader Telegram:", e?.message); }
     }
     await new Promise((res) => setTimeout(res, 1000));
