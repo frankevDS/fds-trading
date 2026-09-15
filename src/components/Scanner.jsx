@@ -4,14 +4,18 @@ import { fmtP } from "../lib/indicators";
 import { scanAllCrypto, clearSignalCache } from "../lib/candleSignal";
 import { Badge } from "./shared";
 
-function TfBadge({ sig }) {
-  const c = !sig||sig==="HOLD" ? C.text3 : sig.includes("BUY") ? C.green : C.red;
-  const bg = !sig||sig==="HOLD" ? "#f8fafc" : sig.includes("BUY") ? C.greenL : C.redL;
+function TfBadge({ label, sig }) {
+  const isBull = sig && sig.includes("BUY");
+  const isBear = sig && sig.includes("SELL");
+  const c  = !sig||sig==="HOLD" ? C.text3 : isBull ? C.green : C.red;
+  const bg = !sig||sig==="HOLD" ? "#f8fafc" : isBull ? C.greenL : C.redL;
+  const bd = !sig||sig==="HOLD" ? C.border : isBull ? C.greenB : C.redB;
   return (
-    <div style={{ fontSize: 9, fontWeight: 700, color: c, background: bg,
-      border: `1px solid ${!sig||sig==="HOLD" ? C.border : sig.includes("BUY") ? C.greenB : C.redB}`,
-      borderRadius: 4, padding: "1px 5px", whiteSpace: "nowrap" }}>
-      {sig ? sig.replace("STRONG_","S.") : "—"}
+    <div style={{ textAlign:"center" }}>
+      {label && <div style={{ fontSize:8, color:C.text3, marginBottom:1 }}>{label}</div>}
+      <div style={{ fontSize:9, fontWeight:700, color:c, background:bg, border:`1px solid ${bd}`, borderRadius:4, padding:"1px 5px", whiteSpace:"nowrap" }}>
+        {sig ? sig.replace("STRONG_","S.") : "—"}
+      </div>
     </div>
   );
 }
@@ -47,26 +51,26 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
   }, [runScan]);
 
   const filtered = results.filter((r) => {
-    if (filter==="BUY") return r.signal==="STRONG_BUY"||r.signal==="BUY";
-    if (filter==="SELL") return r.signal==="STRONG_SELL"||r.signal==="SELL";
+    if (filter==="BUY")    return r.signal==="STRONG_BUY"||r.signal==="BUY";
+    if (filter==="SELL")   return r.signal==="STRONG_SELL"||r.signal==="SELL";
     if (filter==="STRONG") return r.signal==="STRONG_BUY"||r.signal==="STRONG_SELL";
     return true;
   });
 
   const counts = {
     ALL: results.length,
+    STRONG: results.filter(r=>r.signal==="STRONG_BUY"||r.signal==="STRONG_SELL").length,
     BUY: results.filter(r=>r.signal==="STRONG_BUY"||r.signal==="BUY").length,
     SELL: results.filter(r=>r.signal==="STRONG_SELL"||r.signal==="SELL").length,
-    STRONG: results.filter(r=>r.signal==="STRONG_BUY"||r.signal==="STRONG_SELL").length,
   };
 
   return (
-    <div style={{ padding: "14px 14px" }}>
+    <div style={{ padding:"14px" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10, flexWrap:"wrap", gap:8 }}>
         <div>
-          <div style={{ fontSize:13, fontWeight:700, color:C.text }}>Signal Scanner</div>
-          <div style={{ fontSize:10, color:C.text3, marginTop:2 }}>
-            <strong>Closed 15m candles</strong> — signals only update when a candle closes. No more flipping every few seconds.
+          <div style={{ fontSize:14, fontWeight:800, color:C.text }}>Signal Scanner</div>
+          <div style={{ fontSize:10, color:C.text3 }}>
+            ✅ Stable signals — based on <strong>closed 15m candles</strong> only. Updates every 15 min, not every second.
           </div>
           {lastScan && <div style={{ fontSize:10, color:C.text3 }}>Last scan: {lastScan.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</div>}
         </div>
@@ -76,24 +80,24 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
         </button>
       </div>
 
-      <div style={{ background:"#f0fdf4", border:`1px solid ${C.greenB}`, borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:10, color:"#15803d", lineHeight:1.5 }}>
-        ✅ <strong>Signals are now stable.</strong> The scanner reads <strong>closed 15-minute candles</strong> from Binance. A signal will NOT flip between BUY and SELL within seconds — it locks until the next candle closes (~15 minutes). Signals require RSI, MACD, BB, Stochastic, VWAP, OBV, volume confirmation, and 4h trend filter.
+      <div style={{ background:"#f0fdf4", border:`1px solid ${C.greenB}`, borderRadius:9, padding:"8px 12px", marginBottom:12, fontSize:10, color:"#15803d", lineHeight:1.5 }}>
+        Signals require: RSI + MACD + Bollinger Bands + Stochastic + VWAP + OBV + Volume + 4h trend filter + 15m/1h/4h multi-timeframe agreement
       </div>
 
       <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
         {["ALL","STRONG","BUY","SELL"].map((f) => (
           <button key={f} onClick={()=>setFilter(f)}
-            style={{ background:filter===f?C.blue:"#fff", color:filter===f?"#fff":C.text2, border:`1px solid ${filter===f?C.blue:C.border}`, padding:"7px 12px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            style={{ background:filter===f?C.blue:"#fff", color:filter===f?"#fff":C.text2, border:`1px solid ${filter===f?C.blue:C.border}`, padding:"6px 12px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer" }}>
             {f} ({counts[f]||0})
           </button>
         ))}
       </div>
 
       {loading && results.length===0 && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:50, textAlign:"center" }}>
-          <div style={{ fontSize:28, marginBottom:10 }}>📊</div>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:40, textAlign:"center" }}>
+          <div style={{ fontSize:24, marginBottom:8 }}>📊</div>
           <div style={{ fontSize:13, fontWeight:700, color:C.text, marginBottom:4 }}>Loading 15m candles from Binance...</div>
-          <div style={{ fontSize:11, color:C.text3 }}>Fetching 100 closed candles per instrument. This gives stable, reliable signals — not random noise.</div>
+          <div style={{ fontSize:11, color:C.text3 }}>Fetching 100 closed candles per instrument. First load takes ~10 seconds.</div>
         </div>
       )}
 
@@ -101,7 +105,7 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {filtered.map((r) => (
             <div key={r.sym.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"12px 14px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                 <div>
                   <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{r.sym.label}</span>
                   {r.trendBlocked && <span style={{ fontSize:9, color:C.yellow, marginLeft:6 }}>⚠️ 4h blocked</span>}
@@ -112,10 +116,11 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
                 <span style={{ fontSize:15, fontWeight:800, fontFamily:"monospace" }}>${fmtP(r.price, r.sym.id)}</span>
                 <span style={{ fontSize:11, color:C.blue, fontWeight:700 }}>Conf: {r.confidence}%</span>
               </div>
-              <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
-                <div style={{ fontSize:9, color:C.text3 }}>15m:</div><TfBadge sig={r.r15m}/>
-                <div style={{ fontSize:9, color:C.text3 }}>1h:</div><TfBadge sig={r.r1h}/>
-                <div style={{ fontSize:9, color:C.text3 }}>4h:</div><TfBadge sig={r.r4h}/>
+              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                <TfBadge label="15m" sig={r.r15m}/>
+                <TfBadge label="1h"  sig={r.r1h}/>
+                <TfBadge label="4h"  sig={r.r4h}/>
+                {r.nextUpdate && <span style={{ fontSize:9, color:C.text3, marginLeft:"auto" }}>Next: {r.nextUpdate}</span>}
               </div>
               <div style={{ display:"flex", gap:8 }}>
                 <button onClick={()=>onAnalyse(r.sym,"CRYPTO",{price:r.price,...r.ind})}
@@ -129,21 +134,21 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
       )}
 
       {!loading && !isMobile && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, overflow:"hidden" }}>
-          <div style={{ display:"grid", gridTemplateColumns:"130px 110px 100px 60px 90px 90px 90px 1fr", gap:8, padding:"8px 16px", borderBottom:`1px solid ${C.border}`, background:"#f8fafc" }}>
-            {["Symbol","Price","Signal","Conf","15m","1h","4h",""].map((h,i)=>(
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"130px 110px 100px 55px 80px 80px 80px 1fr", gap:8, padding:"8px 16px", borderBottom:`1px solid ${C.border}`, background:"#f8fafc" }}>
+            {["Symbol","Price","Signal","Conf","15m","1h","4h","Actions"].map((h,i)=>(
               <div key={i} style={{ fontSize:9, fontWeight:700, color:C.text3 }}>{h}</div>
             ))}
           </div>
           {filtered.length===0 ? (
-            <div style={{ padding:30, textAlign:"center", fontSize:12, color:C.text3 }}>No signals match this filter on the current 15m candle.</div>
+            <div style={{ padding:30, textAlign:"center", fontSize:12, color:C.text3 }}>No signals match this filter on current candle.</div>
           ) : filtered.map((r,i) => (
-            <div key={r.sym.id} style={{ display:"grid", gridTemplateColumns:"130px 110px 100px 60px 90px 90px 90px 1fr", gap:8, alignItems:"center", padding:"10px 16px",
+            <div key={r.sym.id} style={{ display:"grid", gridTemplateColumns:"130px 110px 100px 55px 80px 80px 80px 1fr", gap:8, alignItems:"center", padding:"10px 16px",
               borderBottom:i<filtered.length-1?`1px solid ${C.border}`:"none",
               background:r.signal==="STRONG_BUY"?"#f0fdf4":r.signal==="STRONG_SELL"?"#fff5f5":"#fff" }}>
               <div>
                 <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{r.sym.label}</div>
-                {r.trendBlocked && <div style={{ fontSize:9, color:C.yellow }}>⚠️ 4h blocked</div>}
+                {r.trendBlocked && <div style={{ fontSize:8, color:C.yellow }}>⚠️ 4h blocked</div>}
               </div>
               <div style={{ fontSize:12, fontWeight:700, fontFamily:"monospace" }}>${fmtP(r.price,r.sym.id)}</div>
               <Badge sig={r.signal} sm={true}/>
@@ -161,9 +166,10 @@ export default function Scanner({ onAnalyse, onTrade, hasBalance }) {
           ))}
         </div>
       )}
+
       {!loading && results.length>0 && (
         <div style={{ fontSize:10, color:C.text3, marginTop:8, textAlign:"center" }}>
-          {results.length} instruments · Closed 15m candles · Next auto-refresh at next 15m close · {filtered.filter(r=>r.signal!=="HOLD").length} actionable signals
+          {results.length} instruments scanned · Closed 15m candles · {filtered.filter(r=>r.signal!=="HOLD").length} actionable signals · Next auto-refresh at next candle close
         </div>
       )}
     </div>
