@@ -67,12 +67,40 @@ export default async function handler(req, res) {
     const qs = qp.toString();
     const url = `${BASE}${def.path}${qs ? `?${qs}` : ""}`;
 
-    const r = await fetch(url, {
-      method: def.method,
-      headers: apiKey ? { "X-MBX-APIKEY": apiKey } : {},
-    });
+    let r;
+    try {
+      r = await fetch(url, {
+        method: def.method,
+        headers: apiKey ? { "X-MBX-APIKEY": apiKey } : {},
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (fetchErr) {
+      const msg = fetchErr?.name === "AbortError"
+        ? "Binance Testnet connection timed out. The testnet may be slow — please try again."
+        : `Cannot reach Binance Testnet: ${fetchErr?.message}`;
+      return res.status(503).json({ error: msg });
+    }
 
-    const data = await r.json();
+    // Read as text first — Binance sometimes returns HTML on geo-block or error
+    const rawText = await r.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      // Binance returned HTML (geo-block or server error page)
+      if (rawText.toLowerCase().includes("eligibility") || rawText.toLowerCase().includes("restricted")) {
+        return res.status(403).json({
+          error: "Service unavailable from a restricted location according to Binance eligibility rules. Check your Vercel region is set to Frankfurt (fra1) in vercel.json.",
+        });
+      }
+      if (rawText.toLowerCase().includes("cloudflare") || rawText.toLowerCase().includes("503")) {
+        return res.status(503).json({ error: "Binance Testnet is temporarily unavailable. Please try again in a few minutes." });
+      }
+      return res.status(500).json({
+        error: "Binance Testnet returned an unexpected response (not JSON). This usually means the server is temporarily unavailable or your region is blocked.",
+        hint: "Make sure vercel.json has regions: ['fra1'] and that your Vercel project is deployed to Frankfurt.",
+      });
+    }
 
     if (!r.ok) {
       res.status(r.status).json({
